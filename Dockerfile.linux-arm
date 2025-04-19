@@ -1,0 +1,74 @@
+# Use an ARM64 Alpine base image
+FROM arm64v8/alpine:latest
+
+# Set environment variables to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install base dependencies, build tools, and Flutter packages from Alpine repos
+# Notes:
+# - GTK for UI rendering
+# - gcompat and libc6-compat for library compatibility
+# - musl-dev for C/C++ compilation support
+# - dart-sdk and flutter packages from edge/testing repository
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache \
+    bash \
+    clang \
+    cmake \
+    curl \
+    file \
+    git \
+    ninja \
+    pkgconfig \
+    unzip \
+    which \
+    xz \
+    zip \
+    gtk+3.0-dev \
+    libstdc++ \
+    gcompat \
+    musl-dev \
+    libc6-compat \
+    dart \
+    dart-sdk \
+    flutter-gtk \
+    flutter-tool \
+    flutter-desktop && \
+    rm -rf /var/cache/apk/*
+
+# Verify Flutter installation
+RUN flutter doctor -v
+
+# Set up the working directory inside the container
+WORKDIR /app
+
+# Copy the entire project context into the container's working directory
+COPY . .
+
+# Ensure Linux desktop support is enabled in the Flutter config
+RUN flutter config --enable-linux-desktop
+
+# Define the command to run when the container starts
+# This process includes several workarounds:
+# 1. Copy the Flutter engine library to the ephemeral directory for build
+# 2. Build the Linux application
+# 3. Copy required ICU v76 libraries to the bundle/lib directory for runtime
+#
+# NOTE: When running the built application, you'll need to manually copy
+# icudtl.dat to /usr/lib/flutter/ on the target system:
+# mkdir -p /usr/lib/flutter && cp data/icudtl.dat /usr/lib/flutter/
+CMD mkdir -p /app/linux/flutter/ephemeral && \
+    # Copy Flutter engine library needed by the build process
+    find /usr/lib -name libflutter_linux_gtk.so -exec cp {} /app/linux/flutter/ephemeral/ \; 2>/dev/null && \
+    # Copy ICU data file needed by build process
+    find / -name icudtl.dat -exec cp {} /app/linux/flutter/ephemeral/ \; 2>/dev/null && \
+    # Run the actual build
+    flutter build linux --release && \
+    # Copy required ICU runtime libraries to the final bundle
+    mkdir -p /app/build/linux/arm64/release/bundle/lib && \
+    find /usr/lib -name libicuuc.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name libicudata.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name libicui18n.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null

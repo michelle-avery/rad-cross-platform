@@ -1,0 +1,14 @@
+# Ignore build artifacts and caches
+build/
+.dart_tool/
+
+# Ignore IDE specific files
+.idea/
+*.iml
+.vscode/
+
+# Ignore OS specific files
+.DS_Store
+
+# Ignore git files if copied (though usually handled by gitignore)
+.git/
