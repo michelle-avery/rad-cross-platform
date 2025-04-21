@@ -28,6 +28,7 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositori
     xz \
     zip \
     gtk+3.0-dev \
+    webkit2gtk-4.1-dev \
     libstdc++ \
     gcompat \
     musl-dev \
@@ -71,4 +72,7 @@ CMD mkdir -p /app/linux/flutter/ephemeral && \
     mkdir -p /app/build/linux/arm64/release/bundle/lib && \
     find /usr/lib -name libicuuc.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
     find /usr/lib -name libicudata.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
-    find /usr/lib -name libicui18n.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null
+    find /usr/lib -name libicui18n.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name libsecret-1.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name libglib-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name libgobject-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null

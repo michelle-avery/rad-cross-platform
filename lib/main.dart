@@ -1,6 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:desktop_webview_window/desktop_webview_window.dart';
+import 'dart:io';
 
-void main() {
+void main(List<String> args) async {
+  // Modify main to accept args and be async
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Add this block for desktop_webview_window initialization
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (runWebViewTitleBarWidget(args)) {
+      return;
+    }
+  }
+
   runApp(const MyApp());
 }
 
@@ -67,6 +79,11 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void _launchWebView() async {
+    final webview = await WebviewWindow.create();
+    webview.launch("https://example.com");
+  }
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -108,6 +125,11 @@ class _MyHomePageState extends State<MyHomePage> {
             Text(
               '$_counter',
               style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _launchWebView,
+              child: const Text('Launch Webview'),
             ),
           ],
         ),
