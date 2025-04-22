@@ -47,6 +47,13 @@ static void webview_window_plugin_handle_method_call(
     auto title = fl_value_get_string(fl_value_lookup_string(args, "title"));
     auto title_bar_height =
         fl_value_get_int(fl_value_lookup_string(args, "titleBarHeight"));
+    auto open_maximized_value = fl_value_lookup_string(args, "openMaximized");
+    auto open_fullscreen_value = fl_value_lookup_string(args, "openFullscreen");
+    auto force_native_chromeless_value = fl_value_lookup_string(args, "forceNativeChromeless");
+
+    bool open_maximized = open_maximized_value ? fl_value_get_bool(open_maximized_value) : false;
+    bool open_fullscreen = open_fullscreen_value ? fl_value_get_bool(open_fullscreen_value) : false;
+    bool force_native_chromeless = force_native_chromeless_value ? fl_value_get_bool(force_native_chromeless_value) : false;
 
     auto window_id = next_window_id_;
     g_object_ref(self);
@@ -56,7 +63,8 @@ static void webview_window_plugin_handle_method_call(
           self->windows->erase(window_id);
           g_object_unref(self);
         },
-        title, width, height, title_bar_height);
+        title, width, height, title_bar_height, 
+        open_maximized, open_fullscreen, force_native_chromeless); // Pass new flags
     self->windows->insert({window_id, std::move(webview)});
     next_window_id_++;
     fl_method_call_respond_success(method_call, fl_value_new_int(window_id),

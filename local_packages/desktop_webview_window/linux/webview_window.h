@@ -1,5 +1,6 @@
 //
 // Created by boyan on 10/21/21.
+// Modified by Michelle Avery on 04/22/25.
 //
 
 #ifndef WEBVIEW_WINDOW_LINUX_WEBVIEW_WINDOW_H_
@@ -28,7 +29,10 @@ class WebviewWindow {
   WebviewWindow(FlMethodChannel *method_channel, int64_t window_id,
                 std::function<void()> on_close_callback,
                 const std::string &title, int width, int height,
-                int title_bar_height);
+                int title_bar_height, 
+                bool open_maximized,
+                bool open_fullscreen,
+                bool force_native_chromeless);
 
   virtual ~WebviewWindow();
 
