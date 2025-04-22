@@ -80,7 +80,20 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _launchWebView() async {
-    final webview = await WebviewWindow.create();
+    // Pass configuration to remove title bar (chromeless) and set a large size
+    final webview = await WebviewWindow.create(
+      configuration: CreateConfiguration(
+        titleBarHeight: 0, // Set to 0 for chromeless
+        //windowPosX: 0, // Set to 0 for top-left corner
+        //windowPosY: 0, // Set to 0 for top-left corner
+        //windowWidth: 800, // Set a very large width
+        //windowHeight: 600, // Set a very large height
+        openMaximized: true, // Open maximized
+        //useWindowPositionAndSize: true,
+        // Add other configuration options here if needed
+      ),
+    );
+    // Launch the URL
     webview.launch("https://example.com");
   }
 
