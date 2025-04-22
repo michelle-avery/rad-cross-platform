@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'dart:io';
 import 'package:provider/provider.dart';
@@ -7,6 +8,9 @@ import 'android_webview_widget.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     if (runWebViewTitleBarWidget(args)) {
       return;
@@ -26,11 +30,38 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Remote Assist Display CXP',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: Consumer<AppStateProvider>(
+        builder: (context, appState, _) {
+          if (appState.isConfigured) {
+            if (Platform.isAndroid) {
+              // Show only the webview widget, full screen
+              return Scaffold(
+                body: SafeArea(
+                  child: AndroidWebViewWidget(
+                    url: appState.homeAssistantUrl!,
+                  ),
+                ),
+              );
+            } else if (Platform.isLinux) {
+              // Show a message that the webview is in a separate window
+              return const Scaffold(
+                body:
+                    Center(child: Text('Webview launched in separate window.')),
+              );
+            } else {
+              return const Scaffold(
+                body: Center(child: Text('Platform not supported.')),
+              );
+            }
+          } else {
+            return const MyHomePage(title: 'Configure Home Assistant');
+          }
+        },
+      ),
     );
   }
 }
