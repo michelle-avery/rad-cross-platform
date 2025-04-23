@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 /// Abstract controller for platform-agnostic WebView operations.
 abstract class RadWebViewController {
@@ -16,9 +16,12 @@ bool isConfigured() {
 }
 
 /// Factory to create the correct controller for the current platform.
-RadWebViewController createWebViewController() {
+RadWebViewController createWebViewController(
+    {WebViewController? androidController}) {
   if (Platform.isAndroid) {
-    return AndroidWebViewController();
+    if (androidController == null)
+      throw ArgumentError('WebViewController required for Android');
+    return AndroidWebViewController(androidController);
   } else if (Platform.isLinux) {
     return LinuxWebViewController();
   } else {
@@ -28,14 +31,22 @@ RadWebViewController createWebViewController() {
 
 /// Stub for Android implementation.
 class AndroidWebViewController implements RadWebViewController {
+  final WebViewController controller;
+  AndroidWebViewController(this.controller);
+
   @override
-  Future<String?> getCurrentUrl() async => null;
+  Future<String?> getCurrentUrl() async => await controller.currentUrl();
+
   @override
-  Future<void> navigateToUrl(String url) async {}
+  Future<void> navigateToUrl(String url) async =>
+      await controller.loadRequest(Uri.parse(url));
+
   @override
-  Future<void> evaluateJavascript(String js) async {}
+  Future<void> evaluateJavascript(String js) async =>
+      await controller.runJavaScript(js);
+
   @override
-  Future<void> reload() async {}
+  Future<void> reload() async => await controller.reload();
 }
 
 /// Stub for Linux implementation.

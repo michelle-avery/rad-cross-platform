@@ -9,13 +9,17 @@ class AppStateProvider extends ChangeNotifier {
   String? get homeAssistantUrl => _homeAssistantUrl;
 
   AppStateProvider() {
+    debugPrint('[AppStateProvider] Constructor called.');
     _loadSavedState();
   }
 
   Future<void> _loadSavedState() async {
     final prefs = await SharedPreferences.getInstance();
     _homeAssistantUrl = prefs.getString('home_assistant_url');
+    debugPrint(
+        '[AppStateProvider] Loaded home_assistant_url: \\$_homeAssistantUrl');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
+    debugPrint('[AppStateProvider] isConfigured: \\$_isConfigured');
     notifyListeners();
   }
 
@@ -24,12 +28,15 @@ class AppStateProvider extends ChangeNotifier {
     _homeAssistantUrl = url;
     _isConfigured = true;
     await prefs.setString('home_assistant_url', url);
+    debugPrint(
+        '[AppStateProvider] Saved home_assistant_url: \\$_homeAssistantUrl');
     notifyListeners();
   }
 
   Future<void> resetConfiguration() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('home_assistant_url');
+    debugPrint('[AppStateProvider] Removed home_assistant_url');
     _homeAssistantUrl = null;
     _isConfigured = false;
     notifyListeners();

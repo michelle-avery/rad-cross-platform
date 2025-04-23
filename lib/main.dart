@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
@@ -5,6 +6,10 @@ import 'dart:io';
 import 'package:provider/provider.dart';
 import 'app_state_provider.dart';
 import 'android_webview_widget.dart';
+import 'auth_service.dart';
+import 'oauth_webview.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'webview_controller.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,16 +21,28 @@ void main(List<String> args) async {
       return;
     }
   }
+  final authService = AuthService();
+  await authService.loadTokens();
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppStateProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppStateProvider()),
+        ChangeNotifierProvider<AuthService>.value(value: authService),
+      ],
       child: const MyApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  WebViewController? _dashboardWebViewController;
+  bool _tokenInjected = false;
 
   @override
   Widget build(BuildContext context) {
@@ -34,33 +51,120 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: Consumer<AppStateProvider>(
-        builder: (context, appState, _) {
-          if (appState.isConfigured) {
+      home: Consumer2<AppStateProvider, AuthService>(
+        builder: (context, appState, authService, _) {
+          if (authService.state == AuthState.authenticated &&
+              appState.isConfigured) {
             if (Platform.isAndroid) {
-              // Show only the webview widget, full screen
+              if (!_tokenInjected) {
+                final accessToken = authService.tokens?['access_token'];
+                if (accessToken != null) {
+                  _dashboardWebViewController = WebViewController();
+                  final radController = createWebViewController(
+                      androidController: _dashboardWebViewController!);
+                  final js = '''
+                    localStorage.setItem("hassTokens", JSON.stringify({
+                      access_token: "$accessToken",
+                      expires_in: 1800,
+                      token_type: "Bearer"
+                    }));
+                    window.location.replace('/lovelace/0');
+                  ''';
+                  radController.evaluateJavascript(js);
+                  _tokenInjected = true;
+                }
+              }
               return Scaffold(
                 body: SafeArea(
                   child: AndroidWebViewWidget(
                     url: appState.homeAssistantUrl!,
+                    controller: _dashboardWebViewController,
+                    accessToken: authService.tokens?['access_token'],
+                    refreshToken: authService.tokens?['refresh_token'],
+                    expiresIn: authService.tokens?['expires_in'],
                   ),
                 ),
               );
             } else if (Platform.isLinux) {
-              // Show a message that the webview is in a separate window
-              return const Scaffold(
-                body:
-                    Center(child: Text('Webview launched in separate window.')),
-              );
-            } else {
-              return const Scaffold(
-                body: Center(child: Text('Platform not supported.')),
+              return Scaffold(
+                body: Center(child: Text('Webview is in a separate window.')),
               );
             }
-          } else {
-            return const MyHomePage(title: 'Configure Home Assistant');
           }
+          // If not authenticated, show AuthScreen
+          return const AuthScreen();
         },
+      ),
+    );
+  }
+}
+
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({super.key});
+
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  final _urlController = TextEditingController();
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  void _startOAuthFlow(BuildContext context) async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final url = _urlController.text.trim();
+    setState(() => _isLoading = true);
+    final authUrl = await authService.startAuth(url);
+    setState(() => _isLoading = false);
+    // Show the in-app OAuth webview
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OAuthWebView(
+          authUrl: authUrl,
+          onAuthCode: (code, state) {
+            authService.handleAuthCode(code, state);
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = Provider.of<AuthService>(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Login to Home Assistant')),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: _urlController,
+              decoration: const InputDecoration(
+                labelText: 'Home Assistant URL',
+                hintText: 'https://your-ha.local:8123',
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _isLoading ? null : () => _startOAuthFlow(context),
+              child: _isLoading
+                  ? const CircularProgressIndicator()
+                  : const Text('Login'),
+            ),
+            const SizedBox(height: 24),
+            if (authService.state == AuthState.error)
+              Text(authService.errorMessage ?? 'Unknown error',
+                  style: const TextStyle(color: Colors.red)),
+          ],
+        ),
       ),
     );
   }
