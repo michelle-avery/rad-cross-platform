@@ -50,7 +50,7 @@ packages:
     source: hosted
     version: "1.0.8"
   desktop_webview_window:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       path: "local_packages/desktop_webview_window"
       relative: true
