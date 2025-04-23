@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:desktop_webview_window/desktop_webview_window.dart';
 import '../app_state_provider.dart';
 import '../auth_service.dart';
 import 'oauth_webview_screen.dart'; // Corrected import
@@ -17,7 +16,6 @@ class _AuthScreenState extends State<AuthScreen> {
   final _urlController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
-  Webview? _linuxAuthWebview;
 
   @override
   void initState() {
@@ -37,21 +35,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _urlController.dispose();
-    _closeLinuxAuthWebview();
     super.dispose();
-  }
-
-  void _closeLinuxAuthWebview() {
-    try {
-      if (_linuxAuthWebview != null) {
-        _linuxAuthWebview?.close();
-      }
-    } catch (e) {
-      print(
-          '[AuthScreen] Error closing Linux Auth Webview (might be already closed): $e'); // Keep error print
-    } finally {
-      _linuxAuthWebview = null;
-    }
   }
 
   Future<void> _login() async {
@@ -76,9 +60,13 @@ class _AuthScreenState extends State<AuthScreen> {
       final validatedUrl =
           await authService.validateAndSetUrl(_urlController.text);
       await appState.setHomeAssistantUrl(validatedUrl);
-      final authUrl = authService.getAuthorizationUrl();
+
+      final authUrl = await authService.startAuthFlow();
 
       if (Platform.isAndroid) {
+        if (authUrl == null) {
+          throw StateError('startAuthflow returned null for Android');
+        }
         void handleAndroidAuthCode(String code, String state) async {
           // Check mounted before handling code
           if (!mounted) return;
@@ -106,33 +94,23 @@ class _AuthScreenState extends State<AuthScreen> {
           context,
           MaterialPageRoute(
             builder: (context) => OAuthWebView(
-              // Now correctly refers to the imported widget
               authUrl: authUrl,
               onAuthCode: handleAndroidAuthCode,
             ),
           ),
         );
-        // Re-check mounted status after async gap (WebView screen popped)
-        // Check if auth succeeded or if it was cancelled/failed
-        final authService = Provider.of<AuthService>(context, listen: false);
-        if (mounted && authService.state != AuthState.authenticated) {
+        final currentAuthService =
+            Provider.of<AuthService>(context, listen: false);
+        if (mounted && currentAuthService.state != AuthState.authenticated) {
           setState(() {
             if (_errorMessage == null) {
-              // Only set default message if no specific error was set
               _errorMessage = 'Authentication cancelled or failed.';
             }
             _isLoading = false;
           });
         }
-        // If auth WAS successful, the main app state change will handle the UI update,
-        // no need to explicitly set loading false here in that case.
-        // If auth failed inside handleAndroidAuthCode, _isLoading is already set to false.
       } else if (Platform.isLinux) {
-        // Ensure the context is still valid before starting flow
-        if (!mounted) return;
-        await _startLinuxAuthFlow(authUrl, authService, validatedUrl);
-      } else {
-        throw UnsupportedError('Platform not supported for login flow');
+        print('[AuthScreen] Linux auth flow initiated by AuthService.');
       }
     } catch (e) {
       print('[AuthScreen] Login Error: $e');
@@ -144,209 +122,99 @@ class _AuthScreenState extends State<AuthScreen> {
         });
       }
     }
-    // Don't automatically set _isLoading to false here for Linux,
-    // as the auth flow runs in a separate window. It's handled in cleanup/onClose.
-  }
-
-  Future<void> _startLinuxAuthFlow(
-      String authUrl, AuthService authService, String validatedUrl) async {
-    _closeLinuxAuthWebview(); // Ensure any previous auth window is closed
-
-    // Check mounted before creating the webview
-    if (!mounted) return;
-
-    try {
-      _linuxAuthWebview = await WebviewWindow.create(
-        configuration: CreateConfiguration(
-          windowHeight: 700,
-          windowWidth: 600,
-          title: "Home Assistant Login",
-        ),
-      );
-    } catch (e) {
-      print('[AuthScreen Linux] Error creating auth webview: $e');
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Could not open login window: $e';
-          _isLoading = false; // Stop loading if window creation fails
-        });
-      }
-      return;
-    }
-
-    // Check mounted again after await
-    if (!mounted) {
-      _closeLinuxAuthWebview(); // Close if screen disposed during creation
-      return;
-    }
-
-    bool codeHandled = false;
-
-    void cleanup() {
-      // Check mounted before accessing state or webview
-      if (!mounted) return;
-
-      try {
-        // Check if webview still exists before trying to modify/close
-        if (_linuxAuthWebview != null) {
-          _linuxAuthWebview?.setOnUrlRequestCallback(null);
-          _closeLinuxAuthWebview(); // Use the existing close method
-        }
-      } catch (e) {
-        print('[AuthScreen Linux] Error during cleanup: $e');
-      } finally {
-        // Only update state if still mounted and loading
-        if (mounted && !codeHandled && _isLoading) {
-          setState(() {
-            _isLoading = false;
-            if (_errorMessage == null) {
-              _errorMessage = 'Authentication cancelled or failed.';
-            }
-          });
-        }
-      }
-    }
-
-    final redirectUri = authService.redirectUri;
-
-    _linuxAuthWebview!.setOnUrlRequestCallback((url) {
-      // Check mounted before processing callback
-      if (!mounted) return false; // Don't navigate if disposed
-
-      if (url.startsWith(redirectUri) && !codeHandled) {
-        codeHandled = true; // Prevent multiple handling
-        // Use Future.microtask to avoid holding up the callback
-        Future.microtask(() async {
-          // Check mounted before handling code
-          if (!mounted) return;
-          try {
-            final uri = Uri.parse(url);
-            final code = uri.queryParameters['code'];
-            final state = uri.queryParameters['state'];
-
-            if (code != null && state != null) {
-              await authService.handleAuthCode(code, state);
-              // Successful auth state change will trigger rebuild in MyApp
-            } else {
-              throw Exception('Missing code or state in redirect URI');
-            }
-          } catch (e) {
-            print('[AuthScreen Linux] Error handling redirect: $e');
-            if (mounted) {
-              setState(() {
-                _errorMessage = 'Authentication failed: ${e.toString()}';
-                // Keep _isLoading true until cleanup sets it? Or set false here?
-                // Let cleanup handle _isLoading based on codeHandled status
-              });
-            }
-          } finally {
-            // Check mounted before cleanup
-            if (mounted) {
-              cleanup();
-            }
-          }
-        });
-        return false; // Prevent the webview from navigating to the redirect URI
-      }
-      return true; // Allow navigation for other URLs
-    });
-
-    _linuxAuthWebview!.onClose.whenComplete(() {
-      // Check mounted before handling close
-      if (mounted && !codeHandled) {
-        // Only set cancelled message if not already handled and no other error
-        if (_errorMessage == null) {
-          setState(() {
-            _errorMessage = 'Authentication cancelled.';
-          });
-        }
-      }
-      // Always run cleanup, which handles mounted checks and isLoading state
-      cleanup();
-    });
-
-    // Check mounted before launching URL
-    if (!mounted) {
-      _closeLinuxAuthWebview();
-      return;
-    }
-
-    try {
-      _linuxAuthWebview!.launch(authUrl);
-    } catch (e) {
-      print('[AuthScreen Linux] Error launching URL in auth webview: $e');
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Could not load login page: $e';
-          _isLoading = false; // Stop loading if launch fails
-        });
-      }
-      cleanup(); // Cleanup if launch fails
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Removed initial URL setting from build, moved to initState
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Log In to Home Assistant'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _urlController,
-                  decoration: InputDecoration(
-                    labelText: 'Home Assistant URL',
-                    hintText:
-                        'e.g., http://homeassistant.local:8123', // Corrected hint
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8.0),
-                    ),
-                  ),
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                ),
-                const SizedBox(height: 24),
-                if (_isLoading)
-                  const Center(child: CircularProgressIndicator())
-                else
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      textStyle: const TextStyle(fontSize: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8.0),
+    return Consumer<AuthService>(
+      builder: (context, authService, child) {
+        final authState = authService.state;
+        if (authState == AuthState.error && _isLoading) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _errorMessage = authService.errorMessage ??
+                    'An unknown authentication error occurred.';
+              });
+            }
+          });
+        } else if (authState == AuthState.unauthenticated &&
+            _isLoading &&
+            _errorMessage == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _errorMessage =
+                    authService.errorMessage ?? 'Authentication cancelled.';
+              });
+            }
+          });
+        }
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Log In to Home Assistant'),
+            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          ),
+          body: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _urlController,
+                      decoration: InputDecoration(
+                        labelText: 'Home Assistant URL',
+                        hintText: 'e.g., http://homeassistant.local:8123',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
                       ),
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      enableSuggestions: false,
                     ),
-                    onPressed: _login,
-                    child: const Text('Connect'),
-                  ),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 20),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontSize: 14,
+                    const SizedBox(height: 8),
+                    if (_errorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16.0),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _isLoading ? null : _login,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimary,
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Log In'),
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

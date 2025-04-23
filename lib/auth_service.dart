@@ -11,8 +11,11 @@
 
 import 'dart:convert';
 import 'dart:math';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:desktop_webview_window/desktop_webview_window.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'secure_token_storage.dart';
 import 'oauth_config.dart';
 
@@ -31,6 +34,8 @@ class AuthService with ChangeNotifier {
   String? _hassUrl;
   String? _pendingState;
 
+  Webview? _linuxAuthWebview;
+
   AuthState get state => _state;
   String? get errorMessage => _errorMessage;
   Map<String, dynamic>? get tokens => _tokens;
@@ -43,14 +48,32 @@ class AuthService with ChangeNotifier {
     return OAuthConfig.buildRedirectUri(_hassUrl!);
   }
 
-  /// Start the OAuth authentication process.
-  /// Returns the authorization URL to open in a browser or webview.
-  Future<String> startAuth(String hassUrl) async {
-    _hassUrl = hassUrl;
+  /// Start the platform-specific authentication flow.
+  Future<String?> startAuthFlow() async {
+    if (_hassUrl == null) {
+      throw StateError('Home Assistant URL not set.');
+    }
+    _closeLinuxAuthWebview();
+
     _pendingState = OAuthConfig.generateState();
+    final authUrl = OAuthConfig.buildAuthUrl(_hassUrl!, _pendingState!);
+    print('[AuthService] Generated Auth URL state: $_pendingState');
     _state = AuthState.authenticating;
     notifyListeners();
-    return OAuthConfig.buildAuthUrl(hassUrl, _pendingState!);
+
+    if (Platform.isAndroid) {
+      print('[AuthService] Starting Android auth flow, returning URL.');
+      return authUrl;
+    } else if (Platform.isLinux) {
+      print('[AuthService] Starting Linux auth flow internally.');
+      _startLinuxAuthFlowInternal(authUrl);
+      return null;
+    } else {
+      _state = AuthState.error;
+      _errorMessage = 'Unsupported platform for authentication flow.';
+      notifyListeners();
+      throw UnsupportedError('Unsupported platform for authentication flow.');
+    }
   }
 
   Future<String> validateAndSetUrl(String url) async {
@@ -77,7 +100,7 @@ class AuthService with ChangeNotifier {
     if (_hassUrl == null) {
       throw StateError('Home Assistant URL not set.');
     }
-    _pendingState = _generateRandomString(32);
+    _pendingState = OAuthConfig.generateState();
     final Uri authUri = Uri.parse('$_hassUrl/auth/authorize').replace(
       queryParameters: {
         'response_type': 'code',
@@ -136,6 +159,9 @@ class AuthService with ChangeNotifier {
       _errorMessage = 'Network error: $e';
     }
     notifyListeners();
+    if (Platform.isLinux) {
+      _closeLinuxAuthWebview();
+    }
   }
 
   Future<void> loadTokens() async {
@@ -144,10 +170,22 @@ class AuthService with ChangeNotifier {
     print('[AuthService] SecureTokenStorage.readTokens returned: $jsonStr');
     if (jsonStr != null) {
       _tokens = json.decode(jsonStr);
-      _state = AuthState.authenticated;
-      print('[AuthService] Tokens loaded, state set to authenticated');
+      final prefs = await SharedPreferences.getInstance();
+      _hassUrl = prefs.getString('home_assistant_url');
+
+      if (_hassUrl != null && _hassUrl!.isNotEmpty) {
+        _state = AuthState.authenticated;
+        print('[AuthService] Tokens and URL loaded: $_hassUrl');
+      } else {
+        print('[AuthService] No Home Assistant URL found in prefs.');
+        _tokens = null;
+        _hassUrl = null;
+        _state = AuthState.unauthenticated;
+        await logout();
+      }
     } else {
       _tokens = null;
+      _hassUrl = null;
       _state = AuthState.unauthenticated;
       print('[AuthService] No tokens found, state set to unauthenticated');
     }
@@ -157,8 +195,104 @@ class AuthService with ChangeNotifier {
   Future<void> logout() async {
     await SecureTokenStorage.deleteTokens();
     _tokens = null;
+    _hassUrl = null;
+    _pendingState = null;
+    _closeLinuxAuthWebview();
     _state = AuthState.unauthenticated;
     notifyListeners();
+  }
+
+  Future<void> _startLinuxAuthFlowInternal(String authUrl) async {
+    try {
+      _linuxAuthWebview = await WebviewWindow.create(
+        configuration: CreateConfiguration(
+          forceNativeChromeless: true,
+          openFullscreen: true,
+        ),
+      );
+    } catch (e) {
+      print('[AuthService Linux] Error createing auth webview: $e');
+      _state = AuthState.error;
+      _errorMessage = 'Failed to create Linux WebView: $e';
+      notifyListeners();
+      return;
+    }
+
+    bool codeHandled = false;
+    final redirectUri = OAuthConfig.buildRedirectUri(_hassUrl!);
+
+    void cleanup() {
+      try {
+        if (_linuxAuthWebview != null) {
+          _linuxAuthWebview?.setOnUrlRequestCallback(null);
+          _closeLinuxAuthWebview();
+        }
+      } catch (e) {
+        print('[AuthService Linux] Error during cleanup: $e');
+      } finally {
+        if (!codeHandled && _state == AuthState.authenticating) {
+          print(['AuthService Linux] Auth cancelled or failed during cleanup']);
+          _state = AuthState.unauthenticated;
+          _errorMessage = 'Authentication cancelled or failed.';
+          notifyListeners();
+        }
+      }
+    }
+
+    _linuxAuthWebview!.setOnUrlRequestCallback((url) {
+      if (url.startsWith(redirectUri) && !codeHandled) {
+        codeHandled = true;
+        Future.microtask(() async {
+          try {
+            final uri = Uri.parse(url);
+            final code = uri.queryParameters['code'];
+            final state = uri.queryParameters['state'];
+            if (code != null && state != null) {
+              print('[AuthService Linux] Code received: $code, state: $state');
+              await handleAuthCode(code, state);
+            } else {
+              throw Exception('Missing code or state in redirect URI.');
+            }
+          } catch (e) {
+            print('[AuthService Linux] Error handling redirect: $e');
+            _state = AuthState.error;
+            _errorMessage = 'Authentication failed: ${e.toString()}';
+            notifyListeners();
+            _closeLinuxAuthWebview();
+          }
+        });
+        return false;
+      }
+      return true;
+    });
+
+    _linuxAuthWebview!.onClose.whenComplete(() {
+      print('[AuthService Linux] WebView closed.');
+      if (!codeHandled && _state == AuthState.authenticating) {
+        print('[AuthService Linux] Auth cancelled by user closing window.');
+        _state = AuthState.unauthenticated;
+        _errorMessage = 'Authentication cancelled.';
+        notifyListeners();
+      }
+      cleanup();
+    });
+
+    try {
+      _linuxAuthWebview!.launch(authUrl);
+    } catch (e) {
+      print('[AuthService Linux] Error launching URL in auth webview: $e');
+      _state = AuthState.error;
+      _errorMessage = 'Could not load login page: $e';
+      notifyListeners();
+      cleanup();
+    }
+  }
+
+  void _closeLinuxAuthWebview() {
+    if (_linuxAuthWebview != null) {
+      _linuxAuthWebview!.close();
+      _linuxAuthWebview = null;
+    }
   }
 
   static String generateTokenInjectionJs(String accessToken,
@@ -192,12 +326,4 @@ class AuthService with ChangeNotifier {
       }
     """;
   }
-}
-
-String _generateRandomString(int length) {
-  const chars =
-      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  final random = Random.secure();
-  return List.generate(length, (index) => chars[random.nextInt(chars.length)])
-      .join();
 }
