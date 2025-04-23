@@ -1,10 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import '../app_state_provider.dart';
 import '../auth_service.dart';
-import '../oauth_webview.dart'; // Will be moved later
+import 'oauth_webview_screen.dart'; // Corrected import
+import 'dart:io';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -80,9 +80,15 @@ class _AuthScreenState extends State<AuthScreen> {
 
       if (Platform.isAndroid) {
         void handleAndroidAuthCode(String code, String state) async {
+          // Check mounted before handling code
+          if (!mounted) return;
           try {
+            // Get authService again within the callback scope if needed,
+            // or ensure it's captured correctly.
+            final authService =
+                Provider.of<AuthService>(context, listen: false);
             await authService.handleAuthCode(code, state);
-            // No need to pop here, the main app state change will rebuild MyApp
+            // No need to pop here, OAuthWebViewScreen handles popping itself.
           } catch (e) {
             print('[AuthScreen] Error handling auth code from Android: $e');
             if (mounted) {
@@ -100,21 +106,27 @@ class _AuthScreenState extends State<AuthScreen> {
           context,
           MaterialPageRoute(
             builder: (context) => OAuthWebView(
-              // This widget will be moved later
+              // Now correctly refers to the imported widget
               authUrl: authUrl,
               onAuthCode: handleAndroidAuthCode,
             ),
           ),
         );
-        // Re-check mounted status after async gap
+        // Re-check mounted status after async gap (WebView screen popped)
+        // Check if auth succeeded or if it was cancelled/failed
+        final authService = Provider.of<AuthService>(context, listen: false);
         if (mounted && authService.state != AuthState.authenticated) {
           setState(() {
             if (_errorMessage == null) {
+              // Only set default message if no specific error was set
               _errorMessage = 'Authentication cancelled or failed.';
             }
             _isLoading = false;
           });
         }
+        // If auth WAS successful, the main app state change will handle the UI update,
+        // no need to explicitly set loading false here in that case.
+        // If auth failed inside handleAndroidAuthCode, _isLoading is already set to false.
       } else if (Platform.isLinux) {
         // Ensure the context is still valid before starting flow
         if (!mounted) return;
