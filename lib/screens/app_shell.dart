@@ -10,7 +10,7 @@ import '../app_state_provider.dart';
 import '../auth_service.dart';
 import '../oauth_config.dart';
 import '../webview_controller.dart';
-import '../android_webview_widget.dart';
+import '../widgets/android_webview_widget.dart';
 import 'auth_screen.dart';
 
 class RadApp extends StatefulWidget {

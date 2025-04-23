@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'auth_service.dart'; // Import AuthService
+import '../auth_service.dart';
 
 class AndroidWebViewWidget extends StatefulWidget {
   final String url;
