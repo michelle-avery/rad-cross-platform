@@ -21,6 +21,8 @@ dependencies:
 dependency_overrides:
   desktop_webview_window:
     path: local_packages/desktop_webview_window # Use relative path
+  flutter_secure_storage_linux: ^2.0.1
+  flutter_secure_storage_platform_interface: ^2.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -29,6 +29,7 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositori
     zip \
     gtk+3.0-dev \
     webkit2gtk-4.1-dev \
+    libsecret-dev \
     libstdc++ \
     gcompat \
     musl-dev \
@@ -55,24 +56,17 @@ RUN flutter config --enable-linux-desktop
 # Define the command to run when the container starts
 # This process includes several workarounds:
 # 1. Copy the Flutter engine library to the ephemeral directory for build
-# 2. Build the Linux application
+# 2. Build the Linux application, defining APPLICATION_ID and disabling Werror
 # 3. Copy required ICU v76 libraries to the bundle/lib directory for runtime
+# 4. Copy libgobject to the bundle/lib directory (workaround for some systems)
 #
 # NOTE: When running the built application, you'll need to manually copy
 # icudtl.dat to /usr/lib/flutter/ on the target system:
 # mkdir -p /usr/lib/flutter && cp data/icudtl.dat /usr/lib/flutter/
 CMD mkdir -p /app/linux/flutter/ephemeral && \
-    # Copy Flutter engine library needed by the build process
-    find /usr/lib -name libflutter_linux_gtk.so -exec cp {} /app/linux/flutter/ephemeral/ \; 2>/dev/null && \
-    # Copy ICU data file needed by build process
-    find / -name icudtl.dat -exec cp {} /app/linux/flutter/ephemeral/ \; 2>/dev/null && \
-    # Run the actual build
-    flutter build linux --release && \
-    # Copy required ICU runtime libraries to the final bundle
+    cp /usr/lib/libflutter_linux_gtk.so /app/linux/flutter/ephemeral/ && \
+    cp /usr/lib/flutter/icudtl.dat /app/linux/flutter/ephemeral/ && \
+    flutter build linux --release --target-platform linux-arm64 && \
     mkdir -p /app/build/linux/arm64/release/bundle/lib && \
-    find /usr/lib -name libicuuc.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
-    find /usr/lib -name libicudata.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
-    find /usr/lib -name libicui18n.so.76 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
-    find /usr/lib -name libsecret-1.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
-    find /usr/lib -name libglib-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null && \
+    find /usr/lib -name 'libicu*.so.76' -exec cp {} /app/build/linux/arm64/release/bundle/lib/ \; && \
     find /usr/lib -name libgobject-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null

@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter/webview_flutter.dart' as android_webview;
+import 'package:desktop_webview_window/desktop_webview_window.dart';
 
 /// Abstract controller for platform-agnostic WebView operations.
 abstract class RadWebViewController {
@@ -9,29 +10,24 @@ abstract class RadWebViewController {
   Future<void> reload();
 }
 
-/// Returns true if the app is considered configured (placeholder for now).
-bool isConfigured() {
-  // TODO: Implement real configuration check
-  return true;
-}
-
 /// Factory to create the correct controller for the current platform.
 RadWebViewController createWebViewController(
-    {WebViewController? androidController}) {
+    {android_webview.WebViewController? androidController}) {
   if (Platform.isAndroid) {
     if (androidController == null)
       throw ArgumentError('WebViewController required for Android');
     return AndroidWebViewController(androidController);
   } else if (Platform.isLinux) {
+    // Return the Linux controller instance
     return LinuxWebViewController();
   } else {
     throw UnsupportedError('Platform not supported');
   }
 }
 
-/// Stub for Android implementation.
+/// Implementation for Android using webview_flutter.
 class AndroidWebViewController implements RadWebViewController {
-  final WebViewController controller;
+  final android_webview.WebViewController controller;
   AndroidWebViewController(this.controller);
 
   @override
@@ -49,14 +45,39 @@ class AndroidWebViewController implements RadWebViewController {
   Future<void> reload() async => await controller.reload();
 }
 
-/// Stub for Linux implementation.
+/// Implementation for Linux using desktop_webview_window.
 class LinuxWebViewController implements RadWebViewController {
+  Webview? _linuxWebview;
+  String? _currentUrl;
+
+  void setLinuxWebview(Webview webview) {
+    _linuxWebview = webview;
+  }
+
+  /// Gets the underlying Linux Webview instance. Used internally or for specific Linux tasks.
+  Webview? get linuxWebview => _linuxWebview;
+
   @override
-  Future<String?> getCurrentUrl() async => null;
+  Future<String?> getCurrentUrl() async {
+    // desktop_webview_window doesn't directly expose current URL.
+    // Return the locally stored URL or null.
+    return _currentUrl;
+  }
+
   @override
-  Future<void> navigateToUrl(String url) async {}
+  Future<void> navigateToUrl(String url) async {
+    _currentUrl = url; // Optimistically update
+    // launch returns void, cannot be awaited
+    _linuxWebview?.launch(url);
+  }
+
   @override
-  Future<void> evaluateJavascript(String js) async {}
+  Future<void> evaluateJavascript(String js) async {
+    await _linuxWebview?.evaluateJavaScript(js);
+  }
+
   @override
-  Future<void> reload() async {}
+  Future<void> reload() async {
+    await _linuxWebview?.reload();
+  }
 }

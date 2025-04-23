@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'auth_service.dart'; // Import AuthService
 
 class AndroidWebViewWidget extends StatefulWidget {
   final String url;
@@ -43,28 +44,22 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
           },
           onPageFinished: (url) async {
             print('[AndroidWebViewWidget] onPageFinished: \\${url}');
+            // Use the centralized JS generation method
             if (!_tokenInjected &&
                 widget.accessToken != null &&
-                widget.refreshToken != null) {
-              final js = '''
-                localStorage.setItem("hassTokens", JSON.stringify({
-                  access_token: "${widget.accessToken}",
-                  refresh_token: "${widget.refreshToken}",
-                  expires_in: ${widget.expiresIn ?? 1800},
-                  token_type: "Bearer",
-                  clientId: "${widget.url.endsWith('/') ? widget.url : widget.url + '/'}",
-                  hassUrl: "${widget.url}",
-                  ha_auth_provider: "homeassistant",
-                  expires: Date.now() + ((${widget.expiresIn ?? 1800}) * 1000)
-                }));
-                if (!window.location.pathname.endsWith('/lovelace/0')) {
-                  window.location.replace('/lovelace/0');
-                } else {
-                  window.location.reload();
-                }
-              ''';
+                widget.refreshToken != null &&
+                widget.expiresIn != null) {
+              final js = AuthService.generateTokenInjectionJs(
+                widget.accessToken!,
+                widget.refreshToken!,
+                widget.expiresIn!,
+                widget.url,
+                widget.url,
+              );
+              print('[AndroidWebViewWidget] Injecting JS...');
               await _controller.runJavaScript(js);
               _tokenInjected = true;
+              print('[AndroidWebViewWidget] JS Injected.');
             }
             if (!_successNotified) {
               _successNotified = true;
