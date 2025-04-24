@@ -11,7 +11,7 @@ class OAuthConfig {
   static const String callbackPath = "auth";
 
   /// The path on the Home Assistant instance where the redirect HTML is hosted.
-  static const String redirectPath = "/local/rad-redirect/redirect.html";
+  static const String redirectPath = "/rad-cxp";
 
   /// OAuth2 response type (authorization code flow).
   static const String responseType = "code";
