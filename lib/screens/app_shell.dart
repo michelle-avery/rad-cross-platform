@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
-import '../app_state_provider.dart';
+import '../providers/app_state_provider.dart';
 import '../auth_service.dart';
 import '../oauth_config.dart';
 import '../webview_controller.dart';
