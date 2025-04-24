@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state_provider.dart';
-import '../auth_service.dart';
+import '../services/auth_service.dart';
 import 'oauth_webview_screen.dart'; // Corrected import
 import 'dart:io';
 

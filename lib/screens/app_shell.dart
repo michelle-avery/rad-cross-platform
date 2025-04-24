@@ -7,7 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
 import '../providers/app_state_provider.dart';
-import '../auth_service.dart';
+import '../services/auth_service.dart';
 import '../oauth_config.dart';
 import '../webview_controller.dart';
 import '../widgets/android_webview_widget.dart';

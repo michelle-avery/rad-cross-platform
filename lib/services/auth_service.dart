@@ -10,14 +10,13 @@
 ///   - Provide hooks for platform-specific redirect handling
 
 import 'dart:convert';
-import 'dart:math';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'secure_token_storage.dart';
-import 'oauth_config.dart';
+import '../secure_token_storage.dart';
+import '../oauth_config.dart';
 
 enum AuthState {
   unauthenticated,

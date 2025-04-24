@@ -4,7 +4,7 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'dart:io';
 import 'package:provider/provider.dart';
 import 'providers/app_state_provider.dart';
-import 'auth_service.dart';
+import '../services/auth_service.dart';
 import 'screens/app_shell.dart';
 import 'package:flutter/foundation.dart'; // Import for kDebugMode
 
