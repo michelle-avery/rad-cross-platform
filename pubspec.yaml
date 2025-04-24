@@ -19,6 +19,9 @@ dependencies:
   http: ^1.2.1
   # Declare the direct dependency
   desktop_webview_window: any
+  web_socket_channel: ^3.0.3
+  uuid: ^4.5.1
+  device_info_plus: ^11.4.0
 
 dependency_overrides:
   # Override with the local path

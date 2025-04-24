@@ -1,0 +1,397 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:radcxp/services/auth_service.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/status.dart' as status;
+
+class WebSocketService {
+  static WebSocketService? _instance;
+  WebSocketChannel? _channel;
+  final StreamController<Map<String, dynamic>> _messageController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  bool _connected = false;
+  bool _isConnecting = false;
+  int _commandId = 1;
+  Map<int, Completer<Map<String, dynamic>>> _pendingCommands = {};
+  String? _token;
+  Timer? _reconnectTimer;
+  Timer? _pingTimer;
+  String? _wsUrl;
+  String? _baseUrl;
+  String? _deviceId;
+  final Duration _heartbeatInterval = const Duration(seconds: 30);
+  final Duration _reconnectDelay = const Duration(seconds: 5);
+
+  Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+  bool get isConnected => _connected;
+
+  static WebSocketService getInstance() {
+    _instance ??= WebSocketService._internal();
+    return _instance!;
+  }
+
+  WebSocketService._internal();
+
+  Future<void> connect(
+    String baseUrl,
+    AuthService authService,
+    String deviceId,
+  ) async {
+    if (_connected || _isConnecting) {
+      debugPrint(
+          'WebSocketService: Already connected or connection in progress. Skipping connect call.');
+      return;
+    }
+    if (_reconnectTimer != null && _reconnectTimer!.isActive) {
+      debugPrint('WebSocketService: Reconnection attempt already scheduled.');
+      return;
+    }
+
+    _isConnecting = true;
+    _connected = false;
+
+    _reconnectTimer?.cancel();
+
+    _baseUrl = baseUrl;
+    _deviceId = deviceId;
+    _wsUrl = baseUrl.replaceAll(RegExp(r'^http'), 'ws') + '/api/websocket';
+    debugPrint(
+        'WebSocketService: Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
+
+    try {
+      _token = authService.tokens?['access_token'] as String?;
+
+      if (_token == null) {
+        debugPrint(
+            'WebSocketService: Connection failed - No access token available from AuthService.tokens.');
+        _handleDisconnect(scheduleReconnect: false);
+        return;
+      }
+      debugPrint(
+          'WebSocketService: Using access token: ${_token!.substring(0, 10)}...');
+
+      // TODO: Implement proper certificate validation for production.
+      // Consider making this configurable or using platform-specific trust mechanisms.
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+
+      final socket = await WebSocket.connect(_wsUrl!, customClient: httpClient);
+      _channel = IOWebSocketChannel(socket);
+
+      debugPrint(
+          'WebSocketService: Connection established, waiting for messages...');
+
+      _channel!.stream.listen(
+        (message) {
+          try {
+            final decodedMessage = jsonDecode(message);
+            if (decodedMessage is Map<String, dynamic>) {
+              _handleMessage(decodedMessage);
+            } else {
+              debugPrint(
+                  'WebSocketService: Received non-JSON message: $message');
+            }
+          } catch (e) {
+            debugPrint(
+                'WebSocketService: Error decoding message: $e\nMessage: $message');
+          }
+        },
+        onError: (error) {
+          debugPrint('WebSocketService: WebSocket error: $error');
+          _handleDisconnect();
+        },
+        onDone: () {
+          debugPrint(
+              'WebSocketService: WebSocket connection closed by server.');
+          _handleDisconnect();
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      debugPrint('WebSocketService: Connection failed: $e');
+      _isConnecting = false;
+      _handleDisconnect();
+    }
+  }
+
+  void disconnect() {
+    debugPrint('WebSocketService: Disconnecting...');
+    _reconnectTimer?.cancel();
+    _pingTimer?.cancel();
+    _connected = false;
+    _isConnecting = false;
+    _pendingCommands.forEach((id, completer) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+            Exception('WebSocket disconnected before command $id completed.'));
+      }
+    });
+    _pendingCommands.clear();
+    _channel?.sink.close(status.normalClosure);
+    _channel = null;
+    _wsUrl = null;
+  }
+
+  void dispose() {
+    debugPrint('WebSocketService: Disposing...');
+    disconnect();
+    _messageController.close();
+    _instance = null;
+  }
+
+  void _handleMessage(Map<String, dynamic> message) {
+    final messageType = message['type'] as String?;
+    debugPrint('WebSocketService: Received message type: $messageType');
+
+    switch (messageType) {
+      case 'auth_required':
+        _authenticate();
+        break;
+      case 'auth_ok':
+        _connected = true;
+        _isConnecting = false;
+        _reconnectTimer?.cancel();
+        debugPrint('WebSocketService: Authenticated successfully.');
+        _startHeartbeat();
+        _registerAndInitialize();
+        break;
+      case 'auth_invalid':
+        debugPrint(
+            'WebSocketService: Authentication failed: ${message['message']}');
+        _isConnecting = false;
+        _handleDisconnect(scheduleReconnect: false);
+        break;
+      case 'result':
+        final id = message['id'] as int?;
+        if (id != null && _pendingCommands.containsKey(id)) {
+          final completer = _pendingCommands.remove(id)!;
+          if (message['success'] == true) {
+            final resultData = message['result'];
+            if (resultData is Map<String, dynamic>) {
+              completer.complete(resultData);
+            } else {
+              completer.complete({});
+              debugPrint(
+                  'WebSocketService: Received success result, but result data is not a Map: $resultData');
+            }
+          } else {
+            final errorMessage =
+                message['error']?['message']?.toString() ?? 'Unknown error';
+            final errorCode = message['error']?['code']?.toString();
+            completer.completeError(
+              WebSocketException(
+                errorMessage,
+                code: errorCode,
+              ),
+            );
+          }
+        } else {
+          debugPrint('WebSocketService: Received result for unknown id: $id');
+        }
+        break;
+      case 'event':
+        _messageController.add(message);
+        break;
+      case 'pong':
+        final id = message['id'] as int?;
+        debugPrint('WebSocketService: Received pong for id: $id');
+        break;
+      default:
+        debugPrint(
+            'WebSocketService: Received unhandled message type: $messageType');
+        _messageController.add(message);
+        break;
+    }
+  }
+
+  void _authenticate() {
+    if (_token != null) {
+      debugPrint('WebSocketService: Sending auth message...');
+      final authMessage = jsonEncode({
+        'type': 'auth',
+        'access_token': _token,
+      });
+      _channel?.sink.add(authMessage);
+    } else {
+      debugPrint(
+          'WebSocketService: Cannot authenticate - token is null. Disconnecting.');
+      _handleDisconnect(scheduleReconnect: false);
+    }
+  }
+
+  void _handleDisconnect({bool scheduleReconnect = true}) {
+    if (!_connected && _reconnectTimer != null && _reconnectTimer!.isActive) {
+      return;
+    }
+    debugPrint(
+        'WebSocketService: Handling disconnect. Schedule reconnect: $scheduleReconnect');
+
+    _connected = false;
+    _isConnecting = false;
+    _pingTimer?.cancel();
+    _reconnectTimer?.cancel();
+
+    _channel?.sink.close(status.normalClosure).catchError((error) {
+      debugPrint('WebSocketService: Error closing channel sink: $error');
+    });
+    _channel = null;
+
+    _pendingCommands.forEach((id, completer) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+            Exception('WebSocket disconnected before command $id completed.'));
+      }
+    });
+    _pendingCommands.clear();
+  }
+
+  void _startHeartbeat() {
+    _pingTimer?.cancel();
+    debugPrint(
+        'WebSocketService: Starting heartbeat timer (${_heartbeatInterval.inSeconds}s interval).');
+    _pingTimer = Timer.periodic(_heartbeatInterval, (_) => _sendPing());
+    _sendPing();
+  }
+
+  void _sendPing() {
+    if (_connected && _channel != null) {
+      final pingId = _commandId++;
+      debugPrint('WebSocketService: Sending ping (id: $pingId)...');
+      try {
+        final pingMessage = jsonEncode({
+          'id': pingId,
+          'type': 'ping',
+        });
+        _channel!.sink.add(pingMessage);
+      } catch (e) {
+        debugPrint('WebSocketService: Error sending ping: $e');
+        _handleDisconnect();
+      }
+    } else {
+      debugPrint('WebSocketService: Cannot send ping - not connected.');
+      _pingTimer?.cancel();
+    }
+  }
+
+  Future<void> _registerAndInitialize() async {
+    if (_deviceId == null) {
+      debugPrint('WebSocketService: Cannot register, deviceId is null.');
+      return;
+    }
+
+    debugPrint('WebSocketService: Starting registration process...');
+    try {
+      await registerDisplay(
+        deviceId: _deviceId!,
+      );
+      debugPrint('WebSocketService: Registration command sent successfully.');
+
+      await subscribeToEvents(deviceId: _deviceId!);
+    } catch (e) {
+      debugPrint(
+          'WebSocketService: Registration failed during _registerAndInitialize: $e');
+    }
+  }
+
+  Future<String> _getDeviceHostname() async {
+    return 'Unknown Device';
+  }
+
+  Future<Map<String, dynamic>> sendCommand(
+    Map<String, dynamic> command, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    if (!_connected || _channel == null) {
+      throw WebSocketException('Not connected to WebSocket.');
+    }
+
+    final commandId = _commandId++;
+    final commandToSend = Map<String, dynamic>.from(command);
+    commandToSend['id'] = commandId;
+
+    final completer = Completer<Map<String, dynamic>>();
+    _pendingCommands[commandId] = completer;
+
+    debugPrint(
+        'WebSocketService: Sending command (id: $commandId): ${commandToSend['type']}');
+
+    try {
+      final message = jsonEncode(commandToSend);
+      _channel!.sink.add(message);
+
+      final result = await completer.future.timeout(timeout, onTimeout: () {
+        _pendingCommands.remove(commandId);
+        throw TimeoutException(
+            'Command $commandId (${commandToSend['type']}) timed out after ${timeout.inSeconds} seconds.');
+      });
+      return result;
+    } catch (e) {
+      _pendingCommands.remove(commandId);
+      debugPrint('WebSocketService: Error sending command $commandId: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> registerDisplay({
+    required String deviceId,
+  }) async {
+    final hostname = await _getDeviceHostname();
+
+    final Map<String, dynamic> command = {
+      'type': 'remote_assist_display/register',
+      'hostname': hostname,
+      'display_id': deviceId,
+    };
+
+    debugPrint(
+        'WebSocketService: Registering display (sending remote_assist_display/register)...');
+    try {
+      final result = await sendCommand(command);
+      debugPrint('WebSocketService: Display registration successful: $result');
+      return result;
+    } catch (e) {
+      debugPrint('WebSocketService: Display registration failed: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> subscribeToEvents({
+    required String deviceId,
+  }) async {
+    final command = {
+      'type': 'remote_assist_display/connect',
+      'display_id': deviceId,
+    };
+
+    debugPrint(
+        'WebSocketService: Subscribing to events (sending remote_assist_display/connect) for device $deviceId...');
+    try {
+      final result = await sendCommand(command);
+      debugPrint('WebSocketService: Event subscription successful: $result');
+      return result;
+    } catch (e, s) {
+      debugPrint('WebSocketService: Event subscription failed: $e');
+      debugPrint('Stack trace: $s');
+      rethrow;
+    }
+  }
+
+  // TODO: Implement other HA API methods (settings, update, etc.)
+}
+
+class WebSocketException implements Exception {
+  final String message;
+  final String? code;
+
+  WebSocketException(this.message, {this.code});
+
+  @override
+  String toString() {
+    return 'WebSocketException: ${code ?? 'UnknownCode'} - $message';
+  }
+}
