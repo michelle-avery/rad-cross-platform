@@ -210,7 +210,30 @@ class WebSocketService {
         }
         break;
       case 'event':
-        _messageController.add(message);
+        final eventData = message['event'] as Map<String, dynamic>?;
+        final command = eventData?['command'] as String?;
+
+        if (command == 'remote_assist_display/navigate_url') {
+          final url = eventData?['url'] as String?;
+          if (url != null && url.isNotEmpty) {
+            debugPrint('WebSocketService: Received navigate_url command: $url');
+            _navigationTargetController.add(url);
+          } else {
+            debugPrint(
+                'WebSocketService: Received navigate_url command with missing/empty url.');
+          }
+        } else if (command == 'remote_assist_display/navigate') {
+          final path = eventData?['path'] as String?;
+          if (path != null && path.isNotEmpty) {
+            debugPrint('WebSocketService: Received navigate command: $path');
+            _navigationTargetController.add(path);
+          } else {
+            debugPrint(
+                'WebSocketService: Received navigate command with missing/empty path.');
+          }
+        } else {
+          _messageController.add(message);
+        }
         break;
       case 'pong':
         final id = message['id'] as int?;

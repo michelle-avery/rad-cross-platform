@@ -91,22 +91,65 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
 
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
-      (dashboardPath) {
-        print(
-            '[AndroidWebViewWidget] Received navigation target: $dashboardPath');
-        String baseUrl = widget.url.endsWith('/')
-            ? widget.url.substring(0, widget.url.length - 1)
-            : widget.url;
-        String path =
-            dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
-        final fullUrl = '$baseUrl$path';
-
-        print('[AndroidWebViewWidget] Navigating to: $fullUrl');
-        if (mounted) {
-          _controller.loadRequest(Uri.parse(fullUrl));
-        } else {
+      (target) async {
+        print('[AndroidWebViewWidget] Received navigation target: $target');
+        if (!mounted) {
           print(
               '[AndroidWebViewWidget] Widget unmounted, skipping navigation.');
+          return;
+        }
+
+        final Uri targetUri = Uri.tryParse(target) ?? Uri();
+        final bool isFullUrl = targetUri.hasScheme &&
+            (targetUri.scheme == 'http' || targetUri.scheme == 'https');
+
+        if (isFullUrl) {
+          // Handle navigate_url command (full URL)
+          print(
+              '[AndroidWebViewWidget] Navigating via loadRequest to: $target');
+          _controller.loadRequest(Uri.parse(target));
+        } else {
+          // Handle navigate command (relative path)
+          final String path = target.startsWith('/') ? target : '/$target';
+          final String baseOrigin = Uri.parse(widget.url).origin;
+          String? currentWebViewUrl = await _controller.currentUrl();
+          final String currentOrigin = currentWebViewUrl != null
+              ? Uri.parse(currentWebViewUrl).origin
+              : '';
+
+          if (currentOrigin == baseOrigin) {
+            // Use JS pushState for faster navigation within the same origin
+            final String jsNavigate = '''
+              async function browser_navigate(path) {
+                  if (!path) return;
+                  console.log('Navigating via JS pushState to:', path);
+                  history.pushState(null, "", path);
+                  window.dispatchEvent(new CustomEvent("location-changed"));
+              }
+              browser_navigate("$path");
+            ''';
+            print(
+                '[AndroidWebViewWidget] Navigating via JS pushState to: $path');
+            try {
+              await _controller.runJavaScript(jsNavigate);
+              // Manually update the server as onPageFinished won't trigger
+              final newFullUrl = '$baseOrigin$path';
+              print(
+                  '[AndroidWebViewWidget] Reporting JS navigation URL change: $newFullUrl');
+              WebSocketService.getInstance().updateCurrentUrl(newFullUrl);
+            } catch (e) {
+              print(
+                  '[AndroidWebViewWidget] Error running JS navigation: $e. Falling back to loadRequest.');
+              final fullUrl = '$baseOrigin$path';
+              _controller.loadRequest(Uri.parse(fullUrl));
+            }
+          } else {
+            // Fallback to full load if origins don't match or current URL is unknown
+            final fullUrl = '$baseOrigin$path';
+            print(
+                '[AndroidWebViewWidget] Origins mismatch or current URL unknown. Navigating via loadRequest to: $fullUrl');
+            _controller.loadRequest(Uri.parse(fullUrl));
+          }
         }
       },
       onError: (error) {

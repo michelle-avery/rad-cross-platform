@@ -148,37 +148,85 @@ class _AppShellState extends State<AppShell> {
     _navigationSubscription?.cancel();
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
-      (dashboardPath) {
-        print('[AppShell] Received Linux navigation target: $dashboardPath');
-        String baseUrl =
-            url.endsWith('/') ? url.substring(0, url.length - 1) : url;
-        String path =
-            dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
-        final fullUrl = '$baseUrl$path';
+      (target) async {
+        print('[AppShell] Received Linux navigation target: $target');
+        if (_linuxRadController == null) {
+          print('[AppShell] Linux controller is null, skipping navigation.');
+          return;
+        }
 
-        print('[AppShell] Navigating Linux WebView to: $fullUrl');
-        _linuxRadController?.navigateToUrl(fullUrl);
-        Future.delayed(const Duration(milliseconds: 1000), () async {
-          if (mounted && _linuxRadController != null) {
+        final Uri targetUri = Uri.tryParse(target) ?? Uri();
+        final bool isFullUrl = targetUri.hasScheme &&
+            (targetUri.scheme == 'http' || targetUri.scheme == 'https');
+
+        if (isFullUrl) {
+          // Handle navigate_url command (full URL)
+          print('[AppShell] Navigating Linux via navigateToUrl to: $target');
+          _linuxRadController!.navigateToUrl(target);
+          // URL update will be handled by the isNavigating listener
+        } else {
+          // Handle navigate command (relative path)
+          final String path = target.startsWith('/') ? target : '/$target';
+          final String baseOrigin = Uri.parse(url).origin;
+          String? currentWebViewUrlRaw;
+          try {
+            currentWebViewUrlRaw = await _linuxRadController!
+                .evaluateJavascript('window.location.href');
+          } catch (e) {
+            print(
+                '[AppShell] Error getting current Linux URL for JS nav check: $e');
+          }
+
+          String? currentWebViewUrl = currentWebViewUrlRaw?.trim();
+          if (currentWebViewUrl != null &&
+              currentWebViewUrl.startsWith('"') &&
+              currentWebViewUrl.endsWith('"')) {
+            currentWebViewUrl =
+                currentWebViewUrl.substring(1, currentWebViewUrl.length - 1);
+          }
+
+          final String currentOrigin = currentWebViewUrl != null
+              ? Uri.parse(currentWebViewUrl).origin
+              : '';
+
+          if (currentOrigin == baseOrigin) {
+            // Use JS pushState for faster navigation within the same origin
+            final escapedPath = path
+                .replaceAll(r'\', r'\\')
+                .replaceAll(r"'", r"\'")
+                .replaceAll(r'"', r'\"');
+            final String jsNavigate = '''
+              console.log('Navigating Linux via JS pushState to: $escapedPath');
+              history.pushState(null, "", "$escapedPath");
+              window.dispatchEvent(new CustomEvent("location-changed"));
+              null; // Explicitly return null
+            ''';
+            print('[AppShell] Navigating Linux via JS pushState to: $path');
             try {
-              final navigatedUrl = await _linuxRadController!
-                  .evaluateJavascript('window.location.href');
-              if (navigatedUrl != null && navigatedUrl.isNotEmpty) {
+              _linuxRadController!.evaluateJavascript(jsNavigate);
+              final newFullUrl = '$baseOrigin$path';
+              print(
+                  '[AppShell] Reporting Linux JS navigation URL change: $newFullUrl');
+              if (mounted && WebSocketService.getInstance().isConnected) {
+                WebSocketService.getInstance().updateCurrentUrl(newFullUrl);
+              } else {
                 print(
-                    "[AppShell] Current Linux URL (after commanded nav): $navigatedUrl");
-                if (WebSocketService.getInstance().isConnected) {
-                  WebSocketService.getInstance().updateCurrentUrl(navigatedUrl);
-                } else {
-                  print(
-                      "[AppShell] WebSocket disconnected before URL update (after commanded nav) could be sent.");
-                }
+                    "[AppShell] WebSocket disconnected or unmounted before Linux JS URL update could be sent.");
               }
             } catch (e) {
               print(
-                  "[AppShell] Error getting URL after commanded navigation: $e");
+                  '[AppShell] Error running Linux JS navigation: $e. Falling back to navigateToUrl.');
+              final fullUrl = '$baseOrigin$path';
+              _linuxRadController!.navigateToUrl(fullUrl);
             }
+          } else {
+            // Fallback to full load if origins don't match or current URL is unknown
+            final fullUrl = '$baseOrigin$path';
+            print(
+                '[AppShell] Linux origins mismatch or current URL unknown ($currentOrigin vs $baseOrigin). Navigating via navigateToUrl to: $fullUrl');
+            _linuxRadController!.navigateToUrl(fullUrl);
           }
-        });
+        }
       },
       onError: (error) {
         print('[AppShell] Error on Linux navigation stream: $error');
@@ -196,8 +244,16 @@ class _AppShellState extends State<AppShell> {
           print(
               "[AppShell] isNavigating is false, token injected. Getting current URL...");
           try {
-            final currentUrl = await _linuxRadController!
+            final currentUrlRaw = await _linuxRadController!
                 .evaluateJavascript('window.location.href');
+
+            String? currentUrl = currentUrlRaw?.trim();
+            if (currentUrl != null &&
+                currentUrl.startsWith('"') &&
+                currentUrl.endsWith('"')) {
+              currentUrl = currentUrl.substring(1, currentUrl.length - 1);
+            }
+
             if (currentUrl != null && currentUrl.isNotEmpty) {
               print(
                   "[AppShell] Current Linux URL (from isNavigating=false): $currentUrl");
