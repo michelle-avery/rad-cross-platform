@@ -10,9 +10,12 @@ import 'package:web_socket_channel/status.dart' as status;
 
 class WebSocketService {
   static WebSocketService? _instance;
-  WebSocketChannel? _channel;
   final StreamController<Map<String, dynamic>> _messageController =
-      StreamController<Map<String, dynamic>>.broadcast();
+      StreamController<
+          Map<String, dynamic>>.broadcast(); // Restore message controller
+  // Stream controller for navigation targets derived from settings
+  final StreamController<String> _navigationTargetController =
+      StreamController<String>.broadcast();
   bool _connected = false;
   bool _isConnecting = false;
   int _commandId = 1;
@@ -23,14 +26,17 @@ class WebSocketService {
   String? _wsUrl;
   String? _baseUrl;
   String? _deviceId;
+  WebSocketChannel? _channel; // Restore channel declaration
   final Duration _heartbeatInterval = const Duration(seconds: 30);
   final Duration _reconnectDelay = const Duration(seconds: 5);
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+  Stream<String> get navigationTargetStream =>
+      _navigationTargetController.stream;
   bool get isConnected => _connected;
 
   static WebSocketService getInstance() {
-    _instance ??= WebSocketService._internal();
+    _instance ??= WebSocketService._internal(); // Corrected initialization
     return _instance!;
   }
 
@@ -141,12 +147,14 @@ class WebSocketService {
     debugPrint('WebSocketService: Disposing...');
     disconnect();
     _messageController.close();
+    _navigationTargetController.close(); // Close the navigation stream
     _instance = null;
   }
 
   void _handleMessage(Map<String, dynamic> message) {
-    final messageType = message['type'] as String?;
-    debugPrint('WebSocketService: Received message type: $messageType');
+    final messageType = message['type'] as String?; // Define messageType here
+    debugPrint(
+        'WebSocketService: Received message type: $messageType'); // Corrected typo
 
     switch (messageType) {
       case 'auth_required':
@@ -291,18 +299,58 @@ class WebSocketService {
       );
       debugPrint('WebSocketService: Registration command sent successfully.');
 
-      await subscribeToEvents(deviceId: _deviceId!);
+      // Fetch settings after registration
+      try {
+        debugPrint('WebSocketService: Fetching display settings...');
+        final settingsResult = await getDisplaySettings(deviceId: _deviceId!);
+        final settings = settingsResult['settings'] as Map<String, dynamic>?;
+        final defaultDashboard = settings?['default_dashboard'] as String?;
+
+        if (defaultDashboard != null && defaultDashboard.isNotEmpty) {
+          debugPrint(
+              'WebSocketService: Found default dashboard: $defaultDashboard');
+          _navigationTargetController.add(defaultDashboard);
+        } else {
+          debugPrint(
+              'WebSocketService: No default dashboard found in settings.');
+        }
+      } catch (e) {
+        debugPrint('WebSocketService: Failed to get display settings: $e');
+        // Proceed without default dashboard navigation
+      }
+
+      // Subscribe to events after attempting to get settings
+      await _subscribeToEventsSafe();
     } catch (e) {
       debugPrint(
-          'WebSocketService: Registration failed during _registerAndInitialize: $e');
+          'WebSocketService: Error during _registerAndInitialize (registration or settings): $e');
+      // Ensure subscription happens even if registration/settings fetch fails
+      await _subscribeToEventsSafe();
+    }
+  }
+
+  // Helper to ensure subscription happens even if prior steps fail
+  Future<void> _subscribeToEventsSafe() async {
+    if (_deviceId != null) {
+      try {
+        await subscribeToEvents(deviceId: _deviceId!);
+      } catch (e) {
+        debugPrint(
+            'WebSocketService: Subscription failed in _subscribeToEventsSafe: $e');
+      }
+    } else {
+      debugPrint(
+          'WebSocketService: Cannot subscribe, deviceId is null in _subscribeToEventsSafe.');
     }
   }
 
   Future<String> _getDeviceHostname() async {
+    // TODO: Implement actual hostname retrieval using device_info_plus or similar
     return 'Unknown Device';
   }
 
   Future<Map<String, dynamic>> sendCommand(
+    // Removed corrupted duplicate block
     Map<String, dynamic> command, {
     Duration timeout = const Duration(seconds: 10),
   }) async {
@@ -381,7 +429,35 @@ class WebSocketService {
     }
   }
 
-  // TODO: Implement other HA API methods (settings, update, etc.)
+  Future<Map<String, dynamic>> getDisplaySettings({
+    required String deviceId,
+  }) async {
+    final command = {
+      'type': 'remote_assist_display/settings',
+      'display_id': deviceId,
+    };
+    debugPrint(
+        'WebSocketService: Getting display settings (sending remote_assist_display/settings)...');
+    try {
+      // The result from sendCommand is already the nested 'result' map on success
+      final result = await sendCommand(command);
+      debugPrint('WebSocketService: Get settings successful: $result');
+      // The actual settings are nested within the result
+      if (result.containsKey('settings') &&
+          result['settings'] is Map<String, dynamic>) {
+        return result; // Return the whole result containing the 'settings' key
+      } else {
+        throw WebSocketException(
+            'Settings data missing or not a map in response.',
+            code: 'invalid_response');
+      }
+    } catch (e) {
+      debugPrint('WebSocketService: Get settings failed: $e');
+      rethrow;
+    }
+  }
+
+  // TODO: Implement other HA API methods (update, etc.)
 }
 
 class WebSocketException implements Exception {

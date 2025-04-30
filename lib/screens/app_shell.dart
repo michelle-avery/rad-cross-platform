@@ -8,6 +8,7 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 
 import '../providers/app_state_provider.dart';
 import '../services/auth_service.dart';
+import '../services/websocket_service.dart'; // Import WebSocketService
 import '../oauth_config.dart';
 import '../webview_controller.dart';
 import '../widgets/android_webview_widget.dart';
@@ -26,6 +27,8 @@ class _AppShellState extends State<AppShell> {
   bool _linuxInitialLoadAttempted = false;
   bool _linuxTokenInjected = false;
   VoidCallback? _isNavigatingListener;
+  StreamSubscription<String>?
+      _navigationSubscription; // Add subscription variable
 
   @override
   void initState() {
@@ -49,6 +52,8 @@ class _AppShellState extends State<AppShell> {
           _linuxWebview?.isNavigating.removeListener(_isNavigatingListener!);
           _isNavigatingListener = null;
         }
+        _navigationSubscription?.cancel(); // Cancel navigation subscription
+        _navigationSubscription = null;
         _linuxWebview?.close();
       }
     } catch (e) {
@@ -133,6 +138,30 @@ class _AppShellState extends State<AppShell> {
     print("[AppShell] Linux WebView created. Setting up callbacks.");
     _linuxRadController = LinuxWebViewController();
     _linuxRadController!.setLinuxWebview(_linuxWebview!);
+
+    // Subscribe to navigation events AFTER controller is set
+    _navigationSubscription?.cancel(); // Cancel any previous subscription
+    _navigationSubscription =
+        WebSocketService.getInstance().navigationTargetStream.listen(
+      (dashboardPath) {
+        print('[AppShell] Received Linux navigation target: $dashboardPath');
+        // Access AppStateProvider safely within the build context scope if needed,
+        // or ensure homeAssistantUrl is available here.
+        // For simplicity, let's assume we can access it via context if needed,
+        // but ideally, it should be passed or readily available.
+        // We'll use the initially passed 'url' for now as the base.
+        String baseUrl =
+            url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+        String path =
+            dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
+        final fullUrl = '$baseUrl$path';
+        print('[AppShell] Navigating Linux WebView to: $fullUrl');
+        _linuxRadController?.navigateToUrl(fullUrl);
+      },
+      onError: (error) {
+        print('[AppShell] Error on Linux navigation stream: $error');
+      },
+    );
 
     _isNavigatingListener = () {
       if (!_linuxWebview!.isNavigating.value && !_linuxTokenInjected) {
