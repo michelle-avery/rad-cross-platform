@@ -32,8 +32,10 @@ void main(List<String> args) async {
           create: (context) => AppStateProvider(
             Provider.of<AuthService>(context, listen: false),
           ),
+          // Return the existing instance if available, otherwise create it (via create).
+          // AppStateProvider listens to authService internally.
           update: (context, authService, previousAppState) =>
-              AppStateProvider(authService),
+              previousAppState ?? AppStateProvider(authService),
         ),
       ],
       child: const MyApp(),
