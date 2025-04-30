@@ -74,16 +74,16 @@ class WebSocketService {
         'WebSocketService: Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
 
     try {
-      _token = authService.tokens?['access_token'] as String?;
+      _token = await authService.getValidAccessToken();
 
       if (_token == null) {
         debugPrint(
-            'WebSocketService: Connection failed - No access token available from AuthService.tokens.');
+            'WebSocketService: Connection failed - Unable to get a valid access token (refresh might have failed or user needs re-login).');
         _handleDisconnect(scheduleReconnect: false);
         return;
       }
       debugPrint(
-          'WebSocketService: Using access token: ${_token!.substring(0, 10)}...');
+          'WebSocketService: Using valid access token: ${_token!.substring(0, 10)}...');
 
       // TODO: Implement proper certificate validation for production.
       // Consider making this configurable or using platform-specific trust mechanisms.

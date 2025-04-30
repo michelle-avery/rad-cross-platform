@@ -30,6 +30,7 @@ class AuthService with ChangeNotifier {
   AuthState _state = AuthState.unauthenticated;
   String? _errorMessage;
   Map<String, dynamic>? _tokens;
+  DateTime? _tokenExpiryTime;
   String? _hassUrl;
   String? _pendingState;
 
@@ -143,6 +144,7 @@ class AuthService with ChangeNotifier {
         _tokens = json.decode(response.body);
         print('[AuthService] Tokens received: ${json.encode(_tokens)}');
         await SecureTokenStorage.saveTokens(response.body);
+        _updateTokenExpiryTime();
         final verify = await SecureTokenStorage.readTokens();
         print(
             '[AuthService] SecureTokenStorage.readTokens after save: $verify');
@@ -168,7 +170,14 @@ class AuthService with ChangeNotifier {
     final jsonStr = await SecureTokenStorage.readTokens();
     print('[AuthService] SecureTokenStorage.readTokens returned: $jsonStr');
     if (jsonStr != null) {
-      _tokens = json.decode(jsonStr);
+      try {
+        _tokens = json.decode(jsonStr);
+        _updateTokenExpiryTime();
+      } catch (e) {
+        print('[AuthService] Error decoding stored tokens: $e');
+        await logout();
+        return;
+      }
       final prefs = await SharedPreferences.getInstance();
       _hassUrl = prefs.getString('home_assistant_url');
 
@@ -194,11 +203,119 @@ class AuthService with ChangeNotifier {
   Future<void> logout() async {
     await SecureTokenStorage.deleteTokens();
     _tokens = null;
+    _tokenExpiryTime = null;
     _hassUrl = null;
     _pendingState = null;
     _closeLinuxAuthWebview();
     _state = AuthState.unauthenticated;
     notifyListeners();
+  }
+
+  void _updateTokenExpiryTime() {
+    if (_tokens != null && _tokens!.containsKey('expires_in')) {
+      final expiresIn = _tokens!['expires_in'];
+      if (expiresIn is int) {
+        _tokenExpiryTime =
+            DateTime.now().add(Duration(seconds: expiresIn - 60));
+        print('[AuthService] Token expiry calculated: $_tokenExpiryTime');
+      } else {
+        _tokenExpiryTime = null;
+        print('[AuthService] Invalid expires_in value: $expiresIn');
+      }
+    } else {
+      _tokenExpiryTime = null;
+      print('[AuthService] No expires_in found in tokens.');
+    }
+  }
+
+  bool _isTokenExpired() {
+    if (_tokens == null || !_tokens!.containsKey('access_token')) {
+      return true;
+    }
+    if (_tokenExpiryTime == null) {
+      print(
+          '[AuthService] Token expiry time unknown, assuming potentially expired.');
+      return true;
+    }
+    return DateTime.now().isAfter(_tokenExpiryTime!);
+  }
+
+  Future<bool> _refreshToken() async {
+    print('[AuthService] Attempting token refresh...');
+    if (_hassUrl == null ||
+        _tokens == null ||
+        !_tokens!.containsKey('refresh_token')) {
+      print(
+          '[AuthService] Refresh failed: Missing URL, tokens, or refresh_token.');
+      return false;
+    }
+
+    final refreshToken = _tokens!['refresh_token'];
+    final clientId = OAuthConfig.buildClientId(_hassUrl!);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_hassUrl/auth/token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refreshToken,
+          'client_id': clientId,
+        },
+      );
+
+      print(
+          '[AuthService] Refresh token response: status=${response.statusCode}, body=${response.body}');
+
+      if (response.statusCode == 200) {
+        _tokens = json.decode(response.body);
+
+        if (!_tokens!.containsKey('refresh_token')) {
+          _tokens!['refresh_token'] = refreshToken;
+          print(
+              '[AuthService] Refresh response missing refresh_token, preserving old one.');
+        }
+        await SecureTokenStorage.saveTokens(json.encode(_tokens));
+        _updateTokenExpiryTime();
+        print('[AuthService] Token refresh successful.');
+        notifyListeners();
+        return true;
+      } else {
+        print(
+            '[AuthService] Refresh failed: Server returned status ${response.statusCode}');
+        await logout();
+        _errorMessage = 'Authentication expired. Please log in again.';
+        _state = AuthState.error;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      print('[AuthService] Exception during token refresh: $e');
+      _errorMessage = 'Network error during token refresh: $e';
+      _state = AuthState.error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<String?> getValidAccessToken() async {
+    if (_isTokenExpired()) {
+      print(
+          '[AuthService] Access token expired or missing. Attempting refresh.');
+      final refreshed = await _refreshToken();
+      if (!refreshed) {
+        print('[AuthService] Failed to refresh token.');
+        return null;
+      }
+    }
+
+    if (_tokens != null && _tokens!.containsKey('access_token')) {
+      return _tokens!['access_token'] as String?;
+    } else {
+      print(
+          '[AuthService] No access token available even after check/refresh.');
+      return null;
+    }
   }
 
   Future<void> _startLinuxAuthFlowInternal(String authUrl) async {
@@ -276,6 +393,17 @@ class AuthService with ChangeNotifier {
       cleanup();
     });
 
+    _linuxAuthWebview!.onClose.whenComplete(() {
+      print('[AuthService Linux] WebView closed.');
+      if (!codeHandled && _state == AuthState.authenticating) {
+        print('[AuthService Linux] Auth cancelled by user closing window.');
+        _state = AuthState.unauthenticated;
+        _errorMessage = 'Authentication cancelled.';
+        notifyListeners();
+      }
+      cleanup();
+    });
+
     try {
       _linuxAuthWebview!.launch(authUrl);
     } catch (e) {
@@ -310,14 +438,17 @@ class AuthService with ChangeNotifier {
 
     return """
       try {
-        localStorage.setItem("hassTokens", '$hassTokensJson');
+        // Use JSON.stringify for safety, though hassTokensJson is already a string
+        localStorage.setItem("hassTokens", JSON.stringify($hassTokensJson));
         console.log('hassTokens injected successfully.');
         // Navigate to the root dashboard or reload if already there
-        if (window.location.pathname !== '/lovelace/0' && window.location.pathname !== '/lovelace') {
-           console.log('Navigating to /lovelace/0');
+        // Check if already at root or lovelace before navigating
+        if (window.location.pathname !== '/' && !window.location.pathname.startsWith('/lovelace')) {
+           console.log('Navigating to /lovelace/0 after token injection.');
+           // Use replace to avoid adding the auth page to history
            window.location.replace('/lovelace/0');
         } else {
-           console.log('Reloading current page.');
+           console.log('Already at root or lovelace, reloading page after token injection.');
            window.location.reload();
         }
       } catch (e) {

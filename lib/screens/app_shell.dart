@@ -28,6 +28,7 @@ class _AppShellState extends State<AppShell> {
   bool _linuxTokenInjected = false;
   bool _isWebViewReady = false;
   bool _isWebSocketConnecting = false;
+  String? _lastInjectedAccessToken;
   VoidCallback? _isNavigatingListener;
   StreamSubscription<String>? _navigationSubscription;
 
@@ -67,15 +68,14 @@ class _AppShellState extends State<AppShell> {
       _linuxTokenInjected = false;
       _isWebViewReady = false;
       _isWebSocketConnecting = false;
+      _lastInjectedAccessToken = null;
     }
   }
 
   Future<void> _injectTokenLinux(AuthService authService) async {
-    if (_linuxWebview == null ||
-        _linuxRadController == null ||
-        _linuxTokenInjected) {
+    if (_linuxWebview == null || _linuxRadController == null) {
       print(
-          "[AppShell] Cannot inject token: Linux webview not ready or token already injected.");
+          "[AppShell] Cannot inject token: Linux webview or controller not ready.");
       return;
     }
     final tokens = authService.tokens;
@@ -100,9 +100,12 @@ class _AppShellState extends State<AppShell> {
           );
           await _linuxRadController!.evaluateJavascript(js);
           _linuxTokenInjected = true;
+          _lastInjectedAccessToken = accessToken;
           print(
-              "[AppShell] Linux token injected successfully via evaluateJavascript.");
-          _signalWebViewReady();
+              "[AppShell] Linux token injected/updated successfully via evaluateJavascript.");
+          if (!_isWebViewReady) {
+            _signalWebViewReady();
+          }
         } catch (e) {
           print("[AppShell] Error injecting token into Linux WebView: $e");
         }
@@ -127,6 +130,7 @@ class _AppShellState extends State<AppShell> {
     _linuxTokenInjected = false;
     _isWebViewReady = false;
     _isWebSocketConnecting = false;
+    _lastInjectedAccessToken = null;
 
     print("[AppShell] Creating Linux WebView window...");
     try {
@@ -294,6 +298,7 @@ class _AppShellState extends State<AppShell> {
             _linuxTokenInjected = false;
             _isWebViewReady = false;
             _isWebSocketConnecting = false;
+            _lastInjectedAccessToken = null;
           });
         }
       });
@@ -418,6 +423,17 @@ class _AppShellState extends State<AppShell> {
           );
         } else if (Platform.isLinux) {
           print("[AppShell] Platform is Linux.");
+
+          final currentAccessToken =
+              authService.tokens?['access_token'] as String?;
+          if (_linuxWebview != null &&
+              currentAccessToken != null &&
+              currentAccessToken != _lastInjectedAccessToken) {
+            print(
+                "[AppShell] Detected token change. Re-injecting token into Linux webview.");
+            Future.microtask(() => _injectTokenLinux(authService));
+          }
+
           if (_linuxWebview == null && !_linuxInitialLoadAttempted) {
             print(
                 "[AppShell] Linux WebView is null and not attempted, creating...");
@@ -433,7 +449,7 @@ class _AppShellState extends State<AppShell> {
           }
 
           print(
-              "[AppShell] Linux WebView active (or attempting). Showing placeholder UI.");
+              "[AppShell] Linux WebView active or initializing. Showing placeholder UI.");
           return Scaffold(
             appBar: AppBar(
               title: const Text('Remote Assist Display'),
