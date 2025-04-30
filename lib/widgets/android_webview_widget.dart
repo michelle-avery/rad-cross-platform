@@ -12,6 +12,7 @@ class AndroidWebViewWidget extends StatefulWidget {
   final int? expiresIn;
   final void Function()? onSuccess;
   final void Function(String error)? onError;
+  final VoidCallback? onWebViewReady;
   const AndroidWebViewWidget({
     super.key,
     required this.url,
@@ -21,6 +22,7 @@ class AndroidWebViewWidget extends StatefulWidget {
     this.expiresIn,
     this.onSuccess,
     this.onError,
+    this.onWebViewReady,
   });
 
   @override
@@ -62,6 +64,9 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
               await _controller.runJavaScript(js);
               _tokenInjected = true;
               print('[AndroidWebViewWidget] JS Injected.');
+              print(
+                  '[AndroidWebViewWidget] Calling onWebViewReady callback...');
+              widget.onWebViewReady?.call();
             }
             if (!_successNotified) {
               _successNotified = true;
@@ -92,18 +97,13 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
             dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
         final fullUrl = '$baseUrl$path';
 
-        // Add a delay to allow initial load and HA JS to settle
-        Future.delayed(const Duration(seconds: 1), () {
-          // Check if the widget is still mounted before navigating
-          if (mounted) {
-            print(
-                '[AndroidWebViewWidget] Delayed Navigation - Navigating to: $fullUrl');
-            _controller.loadRequest(Uri.parse(fullUrl));
-          } else {
-            print(
-                '[AndroidWebViewWidget] Delayed Navigation - Widget unmounted, skipping navigation.');
-          }
-        });
+        print('[AndroidWebViewWidget] Navigating to: $fullUrl');
+        if (mounted) {
+          _controller.loadRequest(Uri.parse(fullUrl));
+        } else {
+          print(
+              '[AndroidWebViewWidget] Widget unmounted, skipping navigation.');
+        }
       },
       onError: (error) {
         print('[AndroidWebViewWidget] Error on navigation stream: $error');

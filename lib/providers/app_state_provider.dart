@@ -110,28 +110,17 @@ class AppStateProvider extends ChangeNotifier {
 
   void _handleAuthStateChanged() {
     debugPrint(
-        '[AppStateProvider] Handling Auth State Change. AuthState: ${_authService.state}, URL: $_homeAssistantUrl, DeviceID: $_deviceId'); // Added DeviceID log
-    final wsService = WebSocketService.getInstance();
+        '[AppStateProvider] Handling Auth State Change. AuthState: ${_authService.state}, URL: $_homeAssistantUrl, DeviceID: $_deviceId');
 
-    if (_authService.state == AuthState.authenticated &&
-        _homeAssistantUrl != null &&
-        _homeAssistantUrl!.isNotEmpty &&
-        _deviceId != null) {
-      if (!wsService.isConnected) {
-        debugPrint(
-            '[AppStateProvider] Authenticated, URL set, DeviceID ready. Connecting WebSocket...');
-        Future.microtask(() =>
-            wsService.connect(_homeAssistantUrl!, _authService, _deviceId!));
-      } else {
-        debugPrint('[AppStateProvider] WebSocket already connected.');
-      }
-    } else {
+    if (_authService.state != AuthState.authenticated) {
+      final wsService = WebSocketService.getInstance();
       if (wsService.isConnected) {
         debugPrint(
-            '[AppStateProvider] Not authenticated, URL missing, or DeviceID missing. Disconnecting WebSocket...');
+            '[AppStateProvider] Auth state changed to unauthenticated. Disconnecting WebSocket...');
         Future.microtask(() => wsService.disconnect());
       } else {
-        debugPrint('[AppStateProvider] WebSocket already disconnected.');
+        debugPrint(
+            '[AppStateProvider] Auth state changed to unauthenticated. WebSocket already disconnected.');
       }
     }
   }

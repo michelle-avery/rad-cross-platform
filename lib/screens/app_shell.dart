@@ -26,6 +26,8 @@ class _AppShellState extends State<AppShell> {
   LinuxWebViewController? _linuxRadController;
   bool _linuxInitialLoadAttempted = false;
   bool _linuxTokenInjected = false;
+  bool _isWebViewReady = false;
+  bool _isWebSocketConnecting = false;
   VoidCallback? _isNavigatingListener;
   StreamSubscription<String>? _navigationSubscription;
 
@@ -63,6 +65,8 @@ class _AppShellState extends State<AppShell> {
       _linuxRadController = null;
       _linuxInitialLoadAttempted = false;
       _linuxTokenInjected = false;
+      _isWebViewReady = false;
+      _isWebSocketConnecting = false;
     }
   }
 
@@ -98,6 +102,7 @@ class _AppShellState extends State<AppShell> {
           _linuxTokenInjected = true;
           print(
               "[AppShell] Linux token injected successfully via evaluateJavascript.");
+          _signalWebViewReady();
         } catch (e) {
           print("[AppShell] Error injecting token into Linux WebView: $e");
         }
@@ -120,6 +125,8 @@ class _AppShellState extends State<AppShell> {
 
     _linuxInitialLoadAttempted = false;
     _linuxTokenInjected = false;
+    _isWebViewReady = false;
+    _isWebSocketConnecting = false;
 
     print("[AppShell] Creating Linux WebView window...");
     try {
@@ -148,6 +155,7 @@ class _AppShellState extends State<AppShell> {
         String path =
             dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
         final fullUrl = '$baseUrl$path';
+
         print('[AppShell] Navigating Linux WebView to: $fullUrl');
         _linuxRadController?.navigateToUrl(fullUrl);
       },
@@ -158,12 +166,14 @@ class _AppShellState extends State<AppShell> {
 
     _isNavigatingListener = () {
       if (!_linuxWebview!.isNavigating.value && !_linuxTokenInjected) {
-        print("[AppShell] isNavigating is false. Attempting token injection.");
+        print(
+            "[AppShell] isNavigating is false and token not injected. Attempting token injection.");
         Future.microtask(() => _injectTokenLinux(authService));
       } else if (_linuxWebview!.isNavigating.value) {
-        print("[AppShell] isNavigating is true.");
+        print("[AppShell] isNavigating is true (still loading).");
       } else if (_linuxTokenInjected) {
-        print("[AppShell] isNavigating is false, but token already injected.");
+        print(
+            "[AppShell] isNavigating is false, token already injected. Waiting for WebSocket connection trigger.");
       }
     };
     _linuxWebview!.isNavigating.addListener(_isNavigatingListener!);
@@ -180,6 +190,8 @@ class _AppShellState extends State<AppShell> {
             _linuxWebview = null;
             _linuxInitialLoadAttempted = true;
             _linuxTokenInjected = false;
+            _isWebViewReady = false;
+            _isWebSocketConnecting = false;
           });
         }
       });
@@ -192,6 +204,61 @@ class _AppShellState extends State<AppShell> {
       print("[AppShell] Error launching URL in Linux WebView: $e");
       _closeLinuxWebview();
       return;
+    }
+  }
+
+  void _signalWebViewReady() {
+    if (!mounted) return;
+    print("[AppShell] WebView is ready (page loaded + token injected).");
+    setState(() {
+      _isWebViewReady = true;
+    });
+    _connectWebSocket();
+  }
+
+  void _connectWebSocket() {
+    if (!mounted || !_isWebViewReady || _isWebSocketConnecting) {
+      print(
+          "[AppShell] Skipping WebSocket connect: mounted=$mounted, webViewReady=$_isWebViewReady, connecting=$_isWebSocketConnecting");
+      return;
+    }
+
+    final appState = Provider.of<AppStateProvider>(context, listen: false);
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final wsService = WebSocketService.getInstance();
+
+    if (authService.state == AuthState.authenticated &&
+        appState.homeAssistantUrl != null &&
+        appState.deviceId != null) {
+      if (!wsService.isConnected) {
+        print("[AppShell] Conditions met. Connecting WebSocket...");
+        setState(() {
+          _isWebSocketConnecting = true;
+        });
+        Future.microtask(() async {
+          try {
+            await wsService.connect(
+                appState.homeAssistantUrl!, authService, appState.deviceId!);
+            if (mounted) {
+              setState(() {
+                _isWebSocketConnecting = false;
+              });
+            }
+          } catch (e) {
+            print("[AppShell] WebSocket connection failed: $e");
+            if (mounted) {
+              setState(() {
+                _isWebSocketConnecting = false;
+              });
+            }
+          }
+        });
+      } else {
+        print("[AppShell] WebSocket already connected.");
+      }
+    } else {
+      print(
+          "[AppShell] Cannot connect WebSocket: Not authenticated, URL missing, or DeviceID missing.");
     }
   }
 
@@ -235,8 +302,10 @@ class _AppShellState extends State<AppShell> {
             accessToken: accessToken,
             refreshToken: refreshToken,
             expiresIn: expiresIn,
+            onWebViewReady: _signalWebViewReady,
             onSuccess: () {
-              print("[AppShell] AndroidWebViewWidget reported success.");
+              print(
+                  "[AppShell] AndroidWebViewWidget reported initial load success.");
             },
             onError: (error) {
               print("[AppShell] AndroidWebViewWidget reported error: $error");
