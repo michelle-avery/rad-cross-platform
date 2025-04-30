@@ -8,6 +8,13 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
 
+class _PendingCommand {
+  final Completer<Map<String, dynamic>> completer;
+  final String commandType;
+
+  _PendingCommand(this.completer, this.commandType);
+}
+
 class WebSocketService {
   static WebSocketService? _instance;
   final StreamController<Map<String, dynamic>> _messageController =
@@ -17,7 +24,7 @@ class WebSocketService {
   bool _connected = false;
   bool _isConnecting = false;
   int _commandId = 1;
-  Map<int, Completer<Map<String, dynamic>>> _pendingCommands = {};
+  final Map<int, _PendingCommand> _pendingCommands = {};
   String? _token;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
@@ -129,9 +136,9 @@ class WebSocketService {
     _pingTimer?.cancel();
     _connected = false;
     _isConnecting = false;
-    _pendingCommands.forEach((id, completer) {
-      if (!completer.isCompleted) {
-        completer.completeError(
+    _pendingCommands.forEach((id, pendingCmd) {
+      if (!pendingCmd.completer.isCompleted) {
+        pendingCmd.completer.completeError(
             Exception('WebSocket disconnected before command $id completed.'));
       }
     });
@@ -162,7 +169,6 @@ class WebSocketService {
         _isConnecting = false;
         _reconnectTimer?.cancel();
         debugPrint('WebSocketService: Authenticated successfully.');
-        _startHeartbeat();
         _registerAndInitialize();
         break;
       case 'auth_invalid':
@@ -174,15 +180,19 @@ class WebSocketService {
       case 'result':
         final id = message['id'] as int?;
         if (id != null && _pendingCommands.containsKey(id)) {
-          final completer = _pendingCommands.remove(id)!;
+          final pendingCmd = _pendingCommands.remove(id)!;
+          final completer = pendingCmd.completer;
+          final originalCommandType = pendingCmd.commandType;
+
           if (message['success'] == true) {
             final resultData = message['result'];
+
             if (resultData is Map<String, dynamic>) {
               completer.complete(resultData);
             } else {
-              completer.complete({});
               debugPrint(
-                  'WebSocketService: Received success result, but result data is not a Map: $resultData');
+                  'WebSocketService: Received successful non-map result ($resultData) for command type $originalCommandType. Completing with empty map.');
+              completer.complete({});
             }
           } else {
             final errorMessage =
@@ -246,9 +256,9 @@ class WebSocketService {
     });
     _channel = null;
 
-    _pendingCommands.forEach((id, completer) {
-      if (!completer.isCompleted) {
-        completer.completeError(
+    _pendingCommands.forEach((id, pendingCmd) {
+      if (!pendingCmd.completer.isCompleted) {
+        pendingCmd.completer.completeError(
             Exception('WebSocket disconnected before command $id completed.'));
       }
     });
@@ -315,10 +325,12 @@ class WebSocketService {
       }
 
       await _subscribeToEventsSafe();
+      debugPrint(
+          'WebSocketService: Initialization complete, starting heartbeat.');
+      _startHeartbeat();
     } catch (e) {
       debugPrint(
           'WebSocketService: Error during _registerAndInitialize (registration or settings): $e');
-      await _subscribeToEventsSafe();
     }
   }
 
@@ -352,9 +364,11 @@ class WebSocketService {
     final commandId = _commandId++;
     final commandToSend = Map<String, dynamic>.from(command);
     commandToSend['id'] = commandId;
+    final commandType = commandToSend['type'] as String? ?? 'unknown';
 
-    final completer = Completer<Map<String, dynamic>>();
-    _pendingCommands[commandId] = completer;
+    final pendingCommand =
+        _PendingCommand(Completer<Map<String, dynamic>>(), commandType);
+    _pendingCommands[commandId] = pendingCommand;
 
     debugPrint(
         'WebSocketService: Sending command (id: $commandId): ${commandToSend['type']}');
@@ -363,7 +377,8 @@ class WebSocketService {
       final message = jsonEncode(commandToSend);
       _channel!.sink.add(message);
 
-      final result = await completer.future.timeout(timeout, onTimeout: () {
+      final result =
+          await pendingCommand.completer.future.timeout(timeout, onTimeout: () {
         _pendingCommands.remove(commandId);
         throw TimeoutException(
             'Command $commandId (${commandToSend['type']}) timed out after ${timeout.inSeconds} seconds.');
@@ -446,7 +461,35 @@ class WebSocketService {
     }
   }
 
-  // TODO: Implement other HA API methods (update, etc.)
+  Future<void> updateCurrentUrl(String url) async {
+    if (!_connected || _channel == null) {
+      debugPrint('WebSocketService: Cannot update URL - not connected.');
+      return;
+    }
+    if (_deviceId == null) {
+      debugPrint('WebSocketService: Cannot update URL - deviceId is null.');
+      return;
+    }
+
+    final Map<String, dynamic> command = {
+      'type': 'remote_assist_display/update',
+      'display_id': _deviceId,
+      'data': {
+        'display': {
+          'current_url': url,
+        },
+      },
+    };
+
+    debugPrint(
+        'WebSocketService: Sending URL update (remote_assist_display/update)... URL: $url');
+    try {
+      await sendCommand(command, timeout: const Duration(seconds: 5));
+      debugPrint('WebSocketService: URL update command sent successfully.');
+    } catch (e) {
+      debugPrint('WebSocketService: Failed to send URL update command: $e');
+    }
+  }
 }
 
 class WebSocketException implements Exception {

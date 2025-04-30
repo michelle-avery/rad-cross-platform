@@ -68,6 +68,10 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
                   '[AndroidWebViewWidget] Calling onWebViewReady callback...');
               widget.onWebViewReady?.call();
             }
+            print(
+                '[AndroidWebViewWidget] Reporting URL change to WebSocket: $url');
+            WebSocketService.getInstance().updateCurrentUrl(url);
+
             if (!_successNotified) {
               _successNotified = true;
               widget.onSuccess?.call();

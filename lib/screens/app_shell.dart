@@ -158,22 +158,68 @@ class _AppShellState extends State<AppShell> {
 
         print('[AppShell] Navigating Linux WebView to: $fullUrl');
         _linuxRadController?.navigateToUrl(fullUrl);
+        Future.delayed(const Duration(milliseconds: 1000), () async {
+          if (mounted && _linuxRadController != null) {
+            try {
+              final navigatedUrl = await _linuxRadController!
+                  .evaluateJavascript('window.location.href');
+              if (navigatedUrl != null && navigatedUrl.isNotEmpty) {
+                print(
+                    "[AppShell] Current Linux URL (after commanded nav): $navigatedUrl");
+                if (WebSocketService.getInstance().isConnected) {
+                  WebSocketService.getInstance().updateCurrentUrl(navigatedUrl);
+                } else {
+                  print(
+                      "[AppShell] WebSocket disconnected before URL update (after commanded nav) could be sent.");
+                }
+              }
+            } catch (e) {
+              print(
+                  "[AppShell] Error getting URL after commanded navigation: $e");
+            }
+          }
+        });
       },
       onError: (error) {
         print('[AppShell] Error on Linux navigation stream: $error');
       },
     );
 
-    _isNavigatingListener = () {
-      if (!_linuxWebview!.isNavigating.value && !_linuxTokenInjected) {
-        print(
-            "[AppShell] isNavigating is false and token not injected. Attempting token injection.");
-        Future.microtask(() => _injectTokenLinux(authService));
-      } else if (_linuxWebview!.isNavigating.value) {
+    _isNavigatingListener = () async {
+      if (!_linuxWebview!.isNavigating.value) {
+        if (!_linuxTokenInjected) {
+          print(
+              "[AppShell] isNavigating is false and token not injected. Attempting token injection.");
+          await _injectTokenLinux(authService);
+        }
+        if (_linuxTokenInjected && _linuxRadController != null) {
+          print(
+              "[AppShell] isNavigating is false, token injected. Getting current URL...");
+          try {
+            final currentUrl = await _linuxRadController!
+                .evaluateJavascript('window.location.href');
+            if (currentUrl != null && currentUrl.isNotEmpty) {
+              print(
+                  "[AppShell] Current Linux URL (from isNavigating=false): $currentUrl");
+              if (mounted && WebSocketService.getInstance().isConnected) {
+                WebSocketService.getInstance().updateCurrentUrl(currentUrl);
+              } else {
+                print(
+                    "[AppShell] WebSocket disconnected or unmounted before URL update (from isNavigating=false) could be sent.");
+              }
+            } else {
+              print(
+                  "[AppShell] evaluateJavascript returned null or empty URL.");
+            }
+          } catch (e) {
+            print("[AppShell] Error getting URL via evaluateJavascript: $e");
+          }
+        } else {
+          print(
+              "[AppShell] isNavigating is false, but token not injected or controller null. Cannot get URL.");
+        }
+      } else {
         print("[AppShell] isNavigating is true (still loading).");
-      } else if (_linuxTokenInjected) {
-        print(
-            "[AppShell] isNavigating is false, token already injected. Waiting for WebSocket connection trigger.");
       }
     };
     _linuxWebview!.isNavigating.addListener(_isNavigatingListener!);
@@ -238,7 +284,10 @@ class _AppShellState extends State<AppShell> {
         Future.microtask(() async {
           try {
             await wsService.connect(
-                appState.homeAssistantUrl!, authService, appState.deviceId!);
+              appState.homeAssistantUrl!,
+              authService,
+              appState.deviceId!,
+            );
             if (mounted) {
               setState(() {
                 _isWebSocketConnecting = false;

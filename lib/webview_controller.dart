@@ -72,8 +72,8 @@ class LinuxWebViewController implements RadWebViewController {
   }
 
   @override
-  Future<void> evaluateJavascript(String js) async {
-    await _linuxWebview?.evaluateJavaScript(js);
+  Future<String?> evaluateJavascript(String js) async {
+    return await _linuxWebview?.evaluateJavaScript(js);
   }
 
   @override
