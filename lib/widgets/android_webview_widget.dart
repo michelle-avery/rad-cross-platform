@@ -1,8 +1,8 @@
-import 'dart:async'; // Import async
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../services/auth_service.dart';
-import '../services/websocket_service.dart'; // Import WebSocketService
+import '../services/websocket_service.dart';
 
 class AndroidWebViewWidget extends StatefulWidget {
   final String url;
@@ -31,8 +31,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
   late final WebViewController _controller;
   bool _successNotified = false;
   bool _tokenInjected = false;
-  StreamSubscription<String>?
-      _navigationSubscription; // Add subscription variable
+  StreamSubscription<String>? _navigationSubscription;
 
   @override
   void initState() {
@@ -48,7 +47,6 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
           },
           onPageFinished: (url) async {
             print('[AndroidWebViewWidget] onPageFinished: \\${url}');
-            // Use the centralized JS generation method
             if (!_tokenInjected &&
                 widget.accessToken != null &&
                 widget.refreshToken != null &&
@@ -80,24 +78,32 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
           },
         ),
       )
-      ..loadRequest(Uri.parse(widget.url)); // Load initial base URL
+      ..loadRequest(Uri.parse(widget.url));
 
-    // Subscribe to navigation events from WebSocketService
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
       (dashboardPath) {
         print(
             '[AndroidWebViewWidget] Received navigation target: $dashboardPath');
-        // Construct the full URL
-        // Ensure no double slashes and correct base URL usage
         String baseUrl = widget.url.endsWith('/')
             ? widget.url.substring(0, widget.url.length - 1)
             : widget.url;
         String path =
             dashboardPath.startsWith('/') ? dashboardPath : '/$dashboardPath';
         final fullUrl = '$baseUrl$path';
-        print('[AndroidWebViewWidget] Navigating to: $fullUrl');
-        _controller.loadRequest(Uri.parse(fullUrl));
+
+        // Add a delay to allow initial load and HA JS to settle
+        Future.delayed(const Duration(seconds: 1), () {
+          // Check if the widget is still mounted before navigating
+          if (mounted) {
+            print(
+                '[AndroidWebViewWidget] Delayed Navigation - Navigating to: $fullUrl');
+            _controller.loadRequest(Uri.parse(fullUrl));
+          } else {
+            print(
+                '[AndroidWebViewWidget] Delayed Navigation - Widget unmounted, skipping navigation.');
+          }
+        });
       },
       onError: (error) {
         print('[AndroidWebViewWidget] Error on navigation stream: $error');
@@ -107,7 +113,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
 
   @override
   void dispose() {
-    _navigationSubscription?.cancel(); // Cancel subscription on dispose
+    _navigationSubscription?.cancel();
     super.dispose();
   }
 

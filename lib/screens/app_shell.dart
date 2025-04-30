@@ -8,7 +8,7 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 
 import '../providers/app_state_provider.dart';
 import '../services/auth_service.dart';
-import '../services/websocket_service.dart'; // Import WebSocketService
+import '../services/websocket_service.dart';
 import '../oauth_config.dart';
 import '../webview_controller.dart';
 import '../widgets/android_webview_widget.dart';
@@ -27,8 +27,7 @@ class _AppShellState extends State<AppShell> {
   bool _linuxInitialLoadAttempted = false;
   bool _linuxTokenInjected = false;
   VoidCallback? _isNavigatingListener;
-  StreamSubscription<String>?
-      _navigationSubscription; // Add subscription variable
+  StreamSubscription<String>? _navigationSubscription;
 
   @override
   void initState() {
@@ -52,7 +51,7 @@ class _AppShellState extends State<AppShell> {
           _linuxWebview?.isNavigating.removeListener(_isNavigatingListener!);
           _isNavigatingListener = null;
         }
-        _navigationSubscription?.cancel(); // Cancel navigation subscription
+        _navigationSubscription?.cancel();
         _navigationSubscription = null;
         _linuxWebview?.close();
       }
@@ -139,17 +138,11 @@ class _AppShellState extends State<AppShell> {
     _linuxRadController = LinuxWebViewController();
     _linuxRadController!.setLinuxWebview(_linuxWebview!);
 
-    // Subscribe to navigation events AFTER controller is set
-    _navigationSubscription?.cancel(); // Cancel any previous subscription
+    _navigationSubscription?.cancel();
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
       (dashboardPath) {
         print('[AppShell] Received Linux navigation target: $dashboardPath');
-        // Access AppStateProvider safely within the build context scope if needed,
-        // or ensure homeAssistantUrl is available here.
-        // For simplicity, let's assume we can access it via context if needed,
-        // but ideally, it should be passed or readily available.
-        // We'll use the initially passed 'url' for now as the base.
         String baseUrl =
             url.endsWith('/') ? url.substring(0, url.length - 1) : url;
         String path =
