@@ -318,6 +318,27 @@ class AuthService with ChangeNotifier {
     }
   }
 
+  Future<bool> forceRefreshToken() async {
+    _log.info('Force refreshing token...');
+    try {
+      final success = await _refreshToken();
+      if (success) {
+        _log.info('Force token refresh successful.');
+      } else {
+        _log.warning('Force token refresh failed (handled by _refreshToken).');
+      }
+      return success;
+    } catch (e, s) {
+      _log.severe('Unexpected exception during forceRefreshToken.', e, s);
+      if (_state != AuthState.error) {
+        _state = AuthState.error;
+        _errorMessage = 'Unexpected error during token refresh: $e';
+        notifyListeners();
+      }
+      return false;
+    }
+  }
+
   Future<void> _startLinuxAuthFlowInternal(String authUrl) async {
     try {
       _linuxAuthWebview = await WebviewWindow.create(

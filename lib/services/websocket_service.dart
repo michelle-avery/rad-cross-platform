@@ -34,6 +34,8 @@ class WebSocketService {
   String? _baseUrl;
   String? _deviceId;
   WebSocketChannel? _channel;
+  AuthService? _authService;
+  bool _isAttemptingRefresh = false;
   String _deviceStorageKey = 'browser_mod-browser-id';
   final Duration _heartbeatInterval = const Duration(seconds: 30);
   final Duration _reconnectDelay = const Duration(seconds: 5);
@@ -73,11 +75,12 @@ class WebSocketService {
 
     _baseUrl = baseUrl;
     _deviceId = deviceId;
+    _authService = authService;
     _wsUrl = baseUrl.replaceAll(RegExp(r'^http'), 'ws') + '/api/websocket';
     _log.info('Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
 
     try {
-      _token = await authService.getValidAccessToken();
+      _token = await _authService!.getValidAccessToken(); // Use stored instance
 
       if (_token == null) {
         _log.warning(
@@ -167,7 +170,47 @@ class WebSocketService {
       case 'auth_invalid':
         _log.warning('Authentication failed: ${message['message']}');
         _isConnecting = false;
-        _handleDisconnect(scheduleReconnect: false);
+
+        if (_isAttemptingRefresh) {
+          _log.severe(
+              'Authentication failed even after attempting token refresh. Disconnecting permanently.');
+          _handleDisconnect(scheduleReconnect: false);
+          _isAttemptingRefresh = false;
+        } else {
+          _log.info('Attempting token refresh due to auth_invalid...');
+          _isAttemptingRefresh = true;
+
+          if (_authService == null) {
+            _log.severe(
+                'AuthService instance is null. Cannot attempt refresh. Disconnecting.');
+            _handleDisconnect(scheduleReconnect: false);
+            _isAttemptingRefresh = false;
+            break;
+          }
+
+          Future.microtask(() async {
+            final refreshed = await _authService!.forceRefreshToken();
+            if (refreshed) {
+              _log.info(
+                  'Token refresh successful after auth_invalid. Re-authenticating...');
+              _token = await _authService!.getValidAccessToken();
+              if (_token != null) {
+                _authenticate();
+                _isAttemptingRefresh = false;
+              } else {
+                _log.severe(
+                    'Refresh seemed successful, but failed to get a valid token afterwards. Disconnecting.');
+                _handleDisconnect(scheduleReconnect: false);
+                _isAttemptingRefresh = false;
+              }
+            } else {
+              _log.warning(
+                  'Token refresh failed after auth_invalid. Disconnecting permanently.');
+              _handleDisconnect(scheduleReconnect: false);
+              _isAttemptingRefresh = false;
+            }
+          });
+        }
         break;
       case 'result':
         final id = message['id'] as int?;
@@ -223,7 +266,8 @@ class WebSocketService {
             _log.warning('Received navigate command with missing/empty path.');
           }
         } else {
-          _log.fine('Received unhandled event command: $command');
+          _log.fine(
+              'Received unhandled event command: $command with data: $eventData');
           _messageController.add(message);
         }
         break;
