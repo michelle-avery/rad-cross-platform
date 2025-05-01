@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
-import 'package:radcxp/providers/app_state_provider.dart';
-import 'package:radcxp/screens/settings_screen.dart';
-import 'package:radcxp/services/websocket_service.dart';
+
+import '../providers/app_state_provider.dart';
+import '../screens/settings_screen.dart';
+import '../services/websocket_service.dart';
+import '../webview_controller.dart';
 
 final _log = Logger('AndroidWebViewWidget');
 
@@ -27,7 +29,8 @@ class AndroidWebViewWidget extends StatefulWidget {
 }
 
 class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
-  InAppWebViewController? _androidController;
+  InAppWebViewController? _nativeController;
+  AndroidWebViewController? _radController;
   StreamSubscription<String>? _navigationSubscription;
 
   @override
@@ -36,58 +39,23 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
       (target) async {
-        _log.info('Received navigation target: $target');
-        if (!mounted || _androidController == null) {
+        _log.info('Received Android navigation target: $target');
+        if (!mounted || _radController == null) {
           _log.warning(
-              'Widget unmounted or controller null, skipping navigation.');
+              'Android widget unmounted or Rad controller null, skipping navigation.');
           return;
         }
 
-        final Uri targetUri = Uri.tryParse(target) ?? Uri();
-        final bool isFullUrl = targetUri.hasScheme &&
-            (targetUri.scheme == 'http' || targetUri.scheme == 'https');
+        final String baseOrigin = Uri.parse(widget.initialUrl).origin;
 
-        if (isFullUrl) {
-          _log.info('Navigating via loadUrl to: $target');
-          _androidController!
-              .loadUrl(urlRequest: URLRequest(url: WebUri(target)));
-        } else {
-          final String path = target.startsWith('/') ? target : '/$target';
-          final WebUri? currentUri = await _androidController!.getUrl();
-          final String baseOrigin =
-              currentUri?.origin ?? Uri.parse(widget.initialUrl).origin;
-
-          // Use JS pushState for potentially faster navigation within the same origin
-          // InAppWebView might handle this better, but explicit JS can be fallback
-          final String jsNavigate = '''
-            async function browser_navigate(path) {
-                if (!path) return;
-                console.log('Navigating via JS pushState to:', path);
-                history.pushState(null, "", path);
-                // Consider dispatching a custom event if needed by the web app
-                // window.dispatchEvent(new CustomEvent("location-changed"));
-            }
-            browser_navigate("$path");
-          ''';
-          _log.info('Attempting navigation via JS pushState to: $path');
-          try {
-            await _androidController!.evaluateJavascript(source: jsNavigate);
-            final newFullUrl = '$baseOrigin$path';
-            _log.info('Reporting JS navigation URL change: $newFullUrl');
-            WebSocketService.getInstance().updateCurrentUrl(newFullUrl);
-          } catch (e, stackTrace) {
-            _log.severe(
-                'Error running JS navigation: $e. Falling back to loadUrl.',
-                e,
-                stackTrace);
-            final fullUrl = '$baseOrigin$path';
-            _androidController!
-                .loadUrl(urlRequest: URLRequest(url: WebUri(fullUrl)));
-          }
-        }
+        await RadWebViewController.handleNavigation(
+          _radController!,
+          target,
+          baseOrigin,
+        );
       },
       onError: (error, stackTrace) {
-        _log.severe('Error on navigation stream.', error, stackTrace);
+        _log.severe('Error on Android navigation stream.', error, stackTrace);
       },
     );
   }
@@ -116,10 +84,11 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
         ),
       },
       onWebViewCreated: (controller) {
-        _androidController = controller;
-        _log.info('Android InAppWebViewController created.');
+        _nativeController = controller;
+        _radController = AndroidWebViewController(controller);
+        _log.info('Android InAppWebViewController created and wrapped.');
 
-        _androidController!.addJavaScriptHandler(
+        _nativeController!.addJavaScriptHandler(
             handlerName: 'threeFingerTapHandler',
             callback: (args) {
               _log.info('JavaScript handler "threeFingerTapHandler" called!');
@@ -140,8 +109,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
         widget.onPageFinished?.call(currentUrl);
         WebSocketService.getInstance().updateCurrentUrl(currentUrl);
 
-        // Inject device ID into localStorage
-        _injectDeviceIdScript(controller);
+        _injectDeviceIdWithHelper(controller);
         _injectGestureDetectionScript(controller);
       },
       onProgressChanged: (controller, progress) {},
@@ -158,6 +126,29 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
             '[WebView Console] ${consoleMessage.messageLevel}: ${consoleMessage.message}');
       },
     );
+  }
+
+  void _injectDeviceIdWithHelper(InAppWebViewController controller) {
+    if (!mounted) return;
+
+    final deviceId =
+        Provider.of<AppStateProvider>(context, listen: false).deviceId;
+    final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
+
+    if (deviceId == null) {
+      _log.warning("Cannot inject device ID script: deviceId is null.");
+      return;
+    }
+
+    final String jsCode = RadWebViewController.generateDeviceIdInjectionJs(
+        deviceId, deviceStorageKey);
+
+    controller.evaluateJavascript(source: jsCode).then((result) {
+      _log.info('JavaScript device ID script injected via helper.');
+    }).catchError((error) {
+      _log.severe(
+          'Error injecting JavaScript device ID script via helper: $error');
+    });
   }
 
   void _injectGestureDetectionScript(InAppWebViewController controller) {
@@ -259,35 +250,6 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
     }).catchError((error) {
       _log.severe(
           'Error injecting JavaScript gesture detection script: $error');
-    });
-  }
-
-  void _injectDeviceIdScript(InAppWebViewController controller) {
-    if (!mounted) return;
-
-    final deviceId =
-        Provider.of<AppStateProvider>(context, listen: false).deviceId;
-    final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
-
-    if (deviceId == null) {
-      _log.warning("Cannot inject device ID script: deviceId is null.");
-      return;
-    }
-
-    final String jsCode = '''
-      try {
-        localStorage.setItem('$deviceStorageKey', '$deviceId');
-        localStorage.setItem('remote_assist_display_settings', {})
-        console.log('Set localStorage[$deviceStorageKey] = $deviceId (on page load)');
-      } catch (e) {
-        console.error('Error setting device ID in localStorage (on page load):', e);
-      }
-    ''';
-
-    controller.evaluateJavascript(source: jsCode).then((result) {
-      _log.info('JavaScript device ID script injected.');
-    }).catchError((error) {
-      _log.severe('Error injecting JavaScript device ID script: $error');
     });
   }
 }

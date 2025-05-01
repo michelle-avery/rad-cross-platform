@@ -84,11 +84,8 @@ class _AppShellState extends State<AppShell> {
     }
     final tokens = authService.tokens;
     final hassUrl = authService.hassUrl;
-    final deviceId =
-        Provider.of<AppStateProvider>(context, listen: false).deviceId;
-    final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
 
-    if (tokens != null && hassUrl != null && deviceId != null) {
+    if (tokens != null && hassUrl != null) {
       final accessToken = tokens['access_token'] as String?;
       final refreshToken = tokens['refresh_token'] as String?;
       final expiresIn = tokens['expires_in'] as int?;
@@ -96,35 +93,40 @@ class _AppShellState extends State<AppShell> {
 
       if (accessToken != null && refreshToken != null && expiresIn != null) {
         _log.info(
-            "Injecting token into Linux WebView via evaluateJavascript...");
+            "Injecting token into Linux WebView via RadWebViewController helper...");
         try {
-          final js = AuthService.generateTokenInjectionJs(
+          final authJs = RadWebViewController.generateAuthInjectionJs(
             accessToken,
             refreshToken,
             expiresIn,
             clientId,
             hassUrl,
           );
-          final deviceIdJs = '''
-            try {
-              localStorage.setItem('$deviceStorageKey', '$deviceId');
-              localStorage.setItem('remote_assist_display_settings', {})
-              console.log('Set localStorage[$deviceStorageKey] = $deviceId');
-            } catch (e) {
-              console.error('Error setting device ID in localStorage:', e);
-            }
-          ''';
-          await _linuxRadController!.evaluateJavascript(js);
-          await _linuxRadController!.evaluateJavascript(deviceIdJs);
+          await _linuxRadController!.evaluateJavascript(authJs);
+
+          final deviceId =
+              Provider.of<AppStateProvider>(context, listen: false).deviceId;
+          final deviceStorageKey =
+              WebSocketService.getInstance().deviceStorageKey;
+          if (deviceId != null) {
+            final deviceIdJs = RadWebViewController.generateDeviceIdInjectionJs(
+                deviceId, deviceStorageKey);
+            await _linuxRadController!.evaluateJavascript(deviceIdJs);
+          } else {
+            _log.warning(
+                "Cannot inject device ID during auth injection: deviceId is null.");
+          }
+
           _linuxTokenInjected = true;
           _lastInjectedAccessToken = accessToken;
           _log.info(
-              "Linux token injected/updated successfully via evaluateJavascript.");
+              "Linux token and device ID injected/updated successfully via helper.");
           if (!_isWebViewReady) {
             _signalWebViewReady();
           }
         } catch (e, s) {
-          _log.severe("Error injecting token into Linux WebView: $e", e, s);
+          _log.severe(
+              "Error injecting token/device ID into Linux WebView: $e", e, s);
         }
       } else {
         _log.warning("Cannot inject token: Missing token details.");
@@ -176,80 +178,13 @@ class _AppShellState extends State<AppShell> {
           _log.warning('Linux controller is null, skipping navigation.');
           return;
         }
+        final String baseOrigin = Uri.parse(url).origin;
 
-        final Uri targetUri = Uri.tryParse(target) ?? Uri();
-        final bool isFullUrl = targetUri.hasScheme &&
-            (targetUri.scheme == 'http' || targetUri.scheme == 'https');
-
-        if (isFullUrl) {
-          // Handle navigate_url command (full URL)
-          _log.info('Navigating Linux via navigateToUrl to: $target');
-          _linuxRadController!.navigateToUrl(target);
-        } else {
-          // Handle navigate command (relative path)
-          final String path = target.startsWith('/') ? target : '/$target';
-          final String baseOrigin = Uri.parse(url).origin;
-          String? currentWebViewUrlRaw;
-          try {
-            currentWebViewUrlRaw = await _linuxRadController!
-                .evaluateJavascript('window.location.href');
-          } catch (e, s) {
-            _log.warning(
-                'Error getting current Linux URL for JS nav check: $e', e, s);
-          }
-
-          String? currentWebViewUrl = currentWebViewUrlRaw?.trim();
-          if (currentWebViewUrl != null &&
-              currentWebViewUrl.startsWith('"') &&
-              currentWebViewUrl.endsWith('"')) {
-            currentWebViewUrl =
-                currentWebViewUrl.substring(1, currentWebViewUrl.length - 1);
-          }
-
-          final String currentOrigin = currentWebViewUrl != null
-              ? Uri.parse(currentWebViewUrl).origin
-              : '';
-
-          if (currentOrigin == baseOrigin) {
-            // Use JS pushState for faster navigation within the same origin
-            final escapedPath = path
-                .replaceAll(r'\', r'\\')
-                .replaceAll(r"'", r"\'")
-                .replaceAll(r'"', r'\"');
-            final String jsNavigate = '''
-              console.log('Navigating Linux via JS pushState to: $escapedPath');
-              history.pushState(null, "", "$escapedPath");
-              window.dispatchEvent(new CustomEvent("location-changed"));
-              null; // Explicitly return null
-            ''';
-            _log.info('Navigating Linux via JS pushState to: $path');
-            try {
-              _linuxRadController!.evaluateJavascript(jsNavigate);
-              final newFullUrl = '$baseOrigin$path';
-              _log.info(
-                  'Reporting Linux JS navigation URL change: $newFullUrl');
-              if (mounted && WebSocketService.getInstance().isConnected) {
-                WebSocketService.getInstance().updateCurrentUrl(newFullUrl);
-              } else {
-                _log.warning(
-                    "WebSocket disconnected or unmounted before Linux JS URL update could be sent.");
-              }
-            } catch (e, s) {
-              _log.severe(
-                  'Error running Linux JS navigation: $e. Falling back to navigateToUrl.',
-                  e,
-                  s);
-              final fullUrl = '$baseOrigin$path';
-              _linuxRadController!.navigateToUrl(fullUrl);
-            }
-          } else {
-            // Fallback to full load if origins don't match or current URL is unknown
-            final fullUrl = '$baseOrigin$path';
-            _log.warning(
-                'Linux origins mismatch or current URL unknown ($currentOrigin vs $baseOrigin). Navigating via navigateToUrl to: $fullUrl');
-            _linuxRadController!.navigateToUrl(fullUrl);
-          }
-        }
+        await RadWebViewController.handleNavigation(
+          _linuxRadController!,
+          target,
+          baseOrigin,
+        );
       },
       onError: (error, stackTrace) {
         _log.severe(
@@ -273,14 +208,8 @@ class _AppShellState extends State<AppShell> {
           final deviceStorageKey =
               WebSocketService.getInstance().deviceStorageKey;
           if (deviceId != null) {
-            final deviceIdJs = '''
-              try {
-                localStorage.setItem('$deviceStorageKey', '$deviceId');
-                console.log('Set localStorage[$deviceStorageKey] = $deviceId (on page load)');
-              } catch (e) {
-                console.error('Error setting device ID in localStorage (on page load):', e);
-              }
-            ''';
+            final deviceIdJs = RadWebViewController.generateDeviceIdInjectionJs(
+                deviceId, deviceStorageKey);
             try {
               await _linuxRadController!.evaluateJavascript(deviceIdJs);
             } catch (e, s) {
@@ -296,15 +225,7 @@ class _AppShellState extends State<AppShell> {
 
           _log.fine("Getting current URL after device ID injection...");
           try {
-            final currentUrlRaw = await _linuxRadController!
-                .evaluateJavascript('window.location.href');
-
-            String? currentUrl = currentUrlRaw?.trim();
-            if (currentUrl != null &&
-                currentUrl.startsWith('"') &&
-                currentUrl.endsWith('"')) {
-              currentUrl = currentUrl.substring(1, currentUrl.length - 1);
-            }
+            final currentUrl = await _linuxRadController!.getCurrentUrl();
 
             if (currentUrl != null && currentUrl.isNotEmpty) {
               _log.info(
@@ -316,10 +237,10 @@ class _AppShellState extends State<AppShell> {
                     "WebSocket disconnected or unmounted before URL update (from isNavigating=false) could be sent.");
               }
             } else {
-              _log.warning("evaluateJavascript returned null or empty URL.");
+              _log.warning("getCurrentUrl returned null or empty URL.");
             }
           } catch (e, s) {
-            _log.severe("Error getting URL via evaluateJavascript: $e", e, s);
+            _log.severe("Error getting URL via getCurrentUrl: $e", e, s);
           }
         } else {
           _log.warning(
@@ -453,21 +374,16 @@ class _AppShellState extends State<AppShell> {
           final refreshToken = tokens?['refresh_token'] as String?;
           final expiresIn = tokens?['expires_in'] as int?;
 
-          // The GestureDetector is removed as the logic is now inside AndroidWebViewWidget
           return AndroidWebViewWidget(
-            key: ValueKey(
-                homeAssistantUrl), // Keep key if needed for state reset on URL change
+            key: ValueKey(homeAssistantUrl),
             initialUrl: homeAssistantUrl,
             onPageFinished: (url) {
               _log.info("AndroidWebViewWidget finished loading: $url");
-              // Signal ready state if not already done (e.g., if initial load)
-              // The gesture detector is now part of AndroidWebViewWidget itself.
-              // We might still need to signal readiness for WebSocket connection here.
               if (!_isWebViewReady) {
                 _signalWebViewReady();
               }
             },
-          ); // End of AndroidWebViewWidget
+          );
         } else if (Platform.isLinux) {
           _log.info("Platform is Linux.");
 
