@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart'; // Import for PointerDeviceKind
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +14,7 @@ import '../oauth_config.dart';
 import '../webview_controller.dart';
 import '../widgets/android_webview_widget.dart';
 import 'auth_screen.dart';
+import 'log_viewer_screen.dart'; // Import the log viewer screen
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -407,20 +409,21 @@ class _AppShellState extends State<AppShell> {
           final refreshToken = tokens?['refresh_token'] as String?;
           final expiresIn = tokens?['expires_in'] as int?;
 
+          // The GestureDetector is removed as the logic is now inside AndroidWebViewWidget
           return AndroidWebViewWidget(
-            url: homeAssistantUrl,
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            expiresIn: expiresIn,
-            onWebViewReady: _signalWebViewReady,
-            onSuccess: () {
-              print(
-                  "[AppShell] AndroidWebViewWidget reported initial load success.");
+            key: ValueKey(
+                homeAssistantUrl), // Keep key if needed for state reset on URL change
+            initialUrl: homeAssistantUrl,
+            onPageFinished: (url) {
+              print("[AppShell] AndroidWebViewWidget finished loading: $url");
+              // Signal ready state if not already done (e.g., if initial load)
+              // The gesture detector is now part of AndroidWebViewWidget itself.
+              // We might still need to signal readiness for WebSocket connection here.
+              if (!_isWebViewReady) {
+                _signalWebViewReady();
+              }
             },
-            onError: (error) {
-              print("[AppShell] AndroidWebViewWidget reported error: $error");
-            },
-          );
+          ); // End of AndroidWebViewWidget
         } else if (Platform.isLinux) {
           print("[AppShell] Platform is Linux.");
 
