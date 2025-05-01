@@ -46,15 +46,31 @@ abstract class RadWebViewController {
     ''';
   }
 
-  static String generateDeviceIdInjectionJs(
-      String deviceId, String storageKey) {
+  static String generateDisplaySettingsInjectionJs(
+    String deviceId,
+    String storageKey,
+    bool hideHeader,
+    bool hideSidebar,
+  ) {
+    final settings = {
+      'hideHeader': hideHeader,
+      'hideSidebar': hideSidebar,
+    };
+    final settingsJson = jsonEncode(settings);
+    final escapedSettingsJson =
+        settingsJson.replaceAll(r'\', r'\\').replaceAll(r"'", r"\'");
+
     return '''
       try {
         localStorage.setItem('$storageKey', '$deviceId');
-        localStorage.setItem('remote_assist_display_settings', '{}');
-        console.log('Set localStorage[$storageKey] = $deviceId via RadWebViewController helper');
+        localStorage.setItem('remote_assist_display_id', '$deviceId');
+        localStorage.setItem('remote_assist_display_settings', '$escapedSettingsJson');
+        console.log('Set localStorage[$storageKey] = $deviceId and remote_assist_display_settings via RadWebViewController helper');
+        if (window.RemoteAssistDisplay) {
+            window.RemoteAssistDisplay.run();
+        }
       } catch (e) {
-        console.error('Error setting device ID in localStorage:', e);
+        console.error('Error setting device ID or display settings in localStorage:', e);
       }
     ''';
   }

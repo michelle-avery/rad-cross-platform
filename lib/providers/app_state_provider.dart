@@ -15,15 +15,21 @@ class AppStateProvider extends ChangeNotifier {
   String? _homeAssistantUrl;
   String? _deviceId;
   String? _hostName = "Unknown";
+  bool? _hideHeader;
+  bool? _hideSidebar;
 
   final AuthService _authService;
 
   static const String _deviceIdKey = 'unique_device_id';
   static const String _haUrlKey = 'home_assistant_url';
+  static const String _hideHeaderKey = 'pref_hide_header';
+  static const String _hideSidebarKey = 'pref_hide_sidebar';
 
   bool get isConfigured => _isConfigured;
   String? get homeAssistantUrl => _homeAssistantUrl;
   String? get deviceId => _deviceId;
+  bool get hideHeader => _hideHeader ?? false;
+  bool get hideSidebar => _hideSidebar ?? false;
 
   AppStateProvider(this._authService) {
     _log.fine('Constructor called.');
@@ -48,7 +54,11 @@ class AppStateProvider extends ChangeNotifier {
   Future<void> _loadSavedState() async {
     final prefs = await SharedPreferences.getInstance();
     _homeAssistantUrl = prefs.getString(_haUrlKey);
-    _log.info('Loaded $_haUrlKey: $_homeAssistantUrl');
+    _homeAssistantUrl = prefs.getString(_haUrlKey);
+    _hideHeader = prefs.getBool(_hideHeaderKey);
+    _hideSidebar = prefs.getBool(_hideSidebarKey);
+    _log.info(
+        'Loaded $_haUrlKey: $_homeAssistantUrl, $_hideHeaderKey: $_hideHeader, $_hideSidebarKey: $_hideSidebar');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
     _log.info('isConfigured: $_isConfigured');
   }
@@ -98,6 +108,29 @@ class AppStateProvider extends ChangeNotifier {
     _log.info('Saved $_haUrlKey: $_homeAssistantUrl');
     notifyListeners();
     _handleAuthStateChanged();
+  }
+
+  Future<void> updateDisplaySettings(
+      {bool? hideHeader, bool? hideSidebar}) async {
+    final prefs = await SharedPreferences.getInstance();
+    bool changed = false;
+
+    if (hideHeader != null && _hideHeader != hideHeader) {
+      _hideHeader = hideHeader;
+      await prefs.setBool(_hideHeaderKey, _hideHeader!);
+      _log.info('Updated $_hideHeaderKey: $_hideHeader');
+      changed = true;
+    }
+    if (hideSidebar != null && _hideSidebar != hideSidebar) {
+      _hideSidebar = hideSidebar;
+      await prefs.setBool(_hideSidebarKey, _hideSidebar!);
+      _log.info('Updated $_hideSidebarKey: $_hideSidebar');
+      changed = true;
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
   }
 
   Future<void> resetConfiguration() async {

@@ -104,14 +104,20 @@ class _AppShellState extends State<AppShell> {
           );
           await _linuxRadController!.evaluateJavascript(authJs);
 
-          final deviceId =
-              Provider.of<AppStateProvider>(context, listen: false).deviceId;
+          final appState =
+              Provider.of<AppStateProvider>(context, listen: false);
+          final deviceId = appState.deviceId;
           final deviceStorageKey =
               WebSocketService.getInstance().deviceStorageKey;
           if (deviceId != null) {
-            final deviceIdJs = RadWebViewController.generateDeviceIdInjectionJs(
-                deviceId, deviceStorageKey);
-            await _linuxRadController!.evaluateJavascript(deviceIdJs);
+            final displaySettingsJs =
+                RadWebViewController.generateDisplaySettingsInjectionJs(
+              deviceId,
+              deviceStorageKey,
+              appState.hideHeader,
+              appState.hideSidebar,
+            );
+            await _linuxRadController!.evaluateJavascript(displaySettingsJs);
           } else {
             _log.warning(
                 "Cannot inject device ID during auth injection: deviceId is null.");
@@ -202,16 +208,22 @@ class _AppShellState extends State<AppShell> {
 
         if (_linuxTokenInjected && _linuxRadController != null) {
           _log.fine(
-              "isNavigating is false, token injected. Injecting device ID...");
-          final deviceId =
-              Provider.of<AppStateProvider>(context, listen: false).deviceId;
+              "isNavigating is false, token injected. Injecting display settings...");
+          final appState =
+              Provider.of<AppStateProvider>(context, listen: false);
+          final deviceId = appState.deviceId;
           final deviceStorageKey =
               WebSocketService.getInstance().deviceStorageKey;
           if (deviceId != null) {
-            final deviceIdJs = RadWebViewController.generateDeviceIdInjectionJs(
-                deviceId, deviceStorageKey);
+            final displaySettingsJs =
+                RadWebViewController.generateDisplaySettingsInjectionJs(
+              deviceId,
+              deviceStorageKey,
+              appState.hideHeader,
+              appState.hideSidebar,
+            );
             try {
-              await _linuxRadController!.evaluateJavascript(deviceIdJs);
+              await _linuxRadController!.evaluateJavascript(displaySettingsJs);
             } catch (e, s) {
               _log.severe(
                   "Error injecting device ID JS in isNavigatingListener: $e",
@@ -315,6 +327,7 @@ class _AppShellState extends State<AppShell> {
             await wsService.connect(
               appState.homeAssistantUrl!,
               authService,
+              appState,
               appState.deviceId!,
             );
             if (mounted) {

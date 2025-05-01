@@ -8,6 +8,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
 
+import '../providers/app_state_provider.dart';
+
 final _log = Logger('WebSocketService');
 
 class _PendingCommand {
@@ -35,6 +37,7 @@ class WebSocketService {
   String? _deviceId;
   WebSocketChannel? _channel;
   AuthService? _authService;
+  AppStateProvider? _appStateProvider;
   bool _isAttemptingRefresh = false;
   String _deviceStorageKey = 'browser_mod-browser-id';
   final Duration _heartbeatInterval = const Duration(seconds: 30);
@@ -56,6 +59,7 @@ class WebSocketService {
   Future<void> connect(
     String baseUrl,
     AuthService authService,
+    AppStateProvider appStateProvider,
     String deviceId,
   ) async {
     if (_connected || _isConnecting) {
@@ -76,11 +80,12 @@ class WebSocketService {
     _baseUrl = baseUrl;
     _deviceId = deviceId;
     _authService = authService;
+    _appStateProvider = appStateProvider;
     _wsUrl = baseUrl.replaceAll(RegExp(r'^http'), 'ws') + '/api/websocket';
     _log.info('Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
 
     try {
-      _token = await _authService!.getValidAccessToken(); // Use stored instance
+      _token = await _authService!.getValidAccessToken();
 
       if (_token == null) {
         _log.warning(
@@ -264,6 +269,31 @@ class WebSocketService {
             _navigationTargetController.add(path);
           } else {
             _log.warning('Received navigate command with missing/empty path.');
+          }
+        } else if (command == 'remote_assist_display/update_settings') {
+          _log.info('Received update_settings command: $eventData');
+          final settings = eventData?['settings'] as Map<String, dynamic>?;
+          if (settings != null && _appStateProvider != null) {
+            final defaultDashboard = settings['default_dashboard'] as String?;
+            if (defaultDashboard != null && defaultDashboard.isNotEmpty) {
+              _log.info(
+                  'Updating default dashboard and navigating: $defaultDashboard');
+              _navigationTargetController.add(defaultDashboard);
+            }
+
+            final hideHeader = settings['hide_header'] as bool?;
+            final hideSidebar = settings['hide_sidebar'] as bool?;
+            if (hideHeader != null || hideSidebar != null) {
+              _log.info(
+                  'Updating display settings: hideHeader=$hideHeader, hideSidebar=$hideSidebar');
+              Future.microtask(() => _appStateProvider!.updateDisplaySettings(
+                    hideHeader: hideHeader,
+                    hideSidebar: hideSidebar,
+                  ));
+            }
+          } else {
+            _log.warning(
+                'Received update_settings command with missing settings data or null AppStateProvider.');
           }
         } else {
           _log.fine(

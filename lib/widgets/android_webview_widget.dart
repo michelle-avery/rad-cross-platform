@@ -109,7 +109,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
         widget.onPageFinished?.call(currentUrl);
         WebSocketService.getInstance().updateCurrentUrl(currentUrl);
 
-        _injectDeviceIdWithHelper(controller);
+        _injectDisplaySettingsWithHelper(controller); // Updated call
         _injectGestureDetectionScript(controller);
       },
       onProgressChanged: (controller, progress) {},
@@ -128,26 +128,31 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
     );
   }
 
-  void _injectDeviceIdWithHelper(InAppWebViewController controller) {
+  void _injectDisplaySettingsWithHelper(InAppWebViewController controller) {
     if (!mounted) return;
 
-    final deviceId =
-        Provider.of<AppStateProvider>(context, listen: false).deviceId;
+    final appState = Provider.of<AppStateProvider>(context, listen: false);
+    final deviceId = appState.deviceId;
     final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
 
     if (deviceId == null) {
-      _log.warning("Cannot inject device ID script: deviceId is null.");
+      _log.warning("Cannot inject display settings script: deviceId is null.");
       return;
     }
 
-    final String jsCode = RadWebViewController.generateDeviceIdInjectionJs(
-        deviceId, deviceStorageKey);
+    final String jsCode =
+        RadWebViewController.generateDisplaySettingsInjectionJs(
+      deviceId,
+      deviceStorageKey,
+      appState.hideHeader,
+      appState.hideSidebar,
+    );
 
     controller.evaluateJavascript(source: jsCode).then((result) {
-      _log.info('JavaScript device ID script injected via helper.');
+      _log.info('JavaScript display settings script injected via helper.');
     }).catchError((error) {
       _log.severe(
-          'Error injecting JavaScript device ID script via helper: $error');
+          'Error injecting JavaScript display settings script via helper: $error');
     });
   }
 
