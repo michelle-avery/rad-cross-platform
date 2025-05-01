@@ -1,21 +1,17 @@
-import 'dart:async'; // Import async for Timer
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:logging/logging.dart'; // Import logging
-import 'package:radcxp/screens/log_viewer_screen.dart'; // Import LogViewerScreen
-// Import WebSocketService directly or via alias if needed elsewhere
+import 'package:logging/logging.dart';
+import 'package:radcxp/screens/log_viewer_screen.dart';
 import 'package:radcxp/services/websocket_service.dart';
 
-// Logger instance
 final _log = Logger('AndroidWebViewWidget');
 
 class AndroidWebViewWidget extends StatefulWidget {
   final String initialUrl;
-  // Callback when a page finishes loading
   final void Function(String url)? onPageFinished;
 
   const AndroidWebViewWidget({
@@ -30,18 +26,11 @@ class AndroidWebViewWidget extends StatefulWidget {
 
 class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
   InAppWebViewController? _androidController;
-  final Set<int> _activePointers = {};
-  StreamSubscription<String>?
-      _navigationSubscription; // Add navigation listener
-  Timer? _threeFingerTapTimer;
-  bool _potentialThreeFingerTap = false;
-  final Duration _threeFingerTapTimeout =
-      const Duration(milliseconds: 300); // Timeout for tap gesture
+  StreamSubscription<String>? _navigationSubscription;
 
   @override
   void initState() {
     super.initState();
-    // Listen for navigation commands from WebSocketService
     _navigationSubscription =
         WebSocketService.getInstance().navigationTargetStream.listen(
       (target) async {
@@ -57,15 +46,12 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
             (targetUri.scheme == 'http' || targetUri.scheme == 'https');
 
         if (isFullUrl) {
-          // Handle navigate_url command (full URL)
           _log.info('Navigating via loadUrl to: $target');
           _androidController!
               .loadUrl(urlRequest: URLRequest(url: WebUri(target)));
         } else {
-          // Handle navigate command (relative path)
           final String path = target.startsWith('/') ? target : '/$target';
           final WebUri? currentUri = await _androidController!.getUrl();
-          // Determine base origin from initialUrl or current URL if available
           final String baseOrigin =
               currentUri?.origin ?? Uri.parse(widget.initialUrl).origin;
 
@@ -84,7 +70,6 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
           _log.info('Attempting navigation via JS pushState to: $path');
           try {
             await _androidController!.evaluateJavascript(source: jsNavigate);
-            // Manually update the server as onLoadStop might not trigger for pushState
             final newFullUrl = '$baseOrigin$path';
             _log.info('Reporting JS navigation URL change: $newFullUrl');
             WebSocketService.getInstance().updateCurrentUrl(newFullUrl);
@@ -107,138 +92,169 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
 
   @override
   void dispose() {
-    _threeFingerTapTimer?.cancel();
-    _navigationSubscription?.cancel(); // Cancel subscription
+    _navigationSubscription?.cancel();
     super.dispose();
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    _activePointers.add(event.pointer);
-    _log.fine(
-        'Pointer down: ${event.pointer}. Active pointers: ${_activePointers.length}');
-
-    // Start tracking for a potential three-finger tap only when exactly 3 fingers are down
-    if (_activePointers.length == 3) {
-      _potentialThreeFingerTap = true;
-      _threeFingerTapTimer?.cancel(); // Cancel any previous timer
-      _threeFingerTapTimer = Timer(_threeFingerTapTimeout, () {
-        _log.fine(
-            'Three-finger tap timed out (fingers held too long or not lifted).');
-        _potentialThreeFingerTap = false; // Reset if fingers held too long
-        // Don't clear pointers here, let onPointerUp handle it
-      });
-      _log.fine('Potential three-finger tap started.');
-    } else {
-      // If more or fewer than 3 fingers are down initially, it's not a valid start
-      // Or if another finger is added after the initial 3
-      _potentialThreeFingerTap = false;
-      _threeFingerTapTimer?.cancel();
-      if (_activePointers.length > 3) {
-        _log.fine('More than 3 fingers detected, cancelling potential tap.');
-      }
-    }
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    int pointersBeforeUp = _activePointers.length;
-    _activePointers.remove(event.pointer);
-    _log.fine(
-        'Pointer up: ${event.pointer}. Active pointers after removal: ${_activePointers.length}');
-
-    // Check if this 'up' event completes a valid three-finger tap
-    if (_potentialThreeFingerTap &&
-        pointersBeforeUp == 3 &&
-        _activePointers.isEmpty) {
-      // This means the 3rd finger was lifted within the timeout, completing the tap sequence
-      _threeFingerTapTimer?.cancel(); // Cancel the timeout timer
-      _log.info('Three-finger tap detected!');
-      _potentialThreeFingerTap = false; // Reset flag
-
-      // --- Show log viewer ---
-      // Ensure context is still valid before navigating
-      if (mounted) {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (context) => const LogViewerScreen(),
-        ));
-      }
-      // -----------------------
-    } else if (_activePointers.isEmpty) {
-      // All fingers lifted, but it wasn't a valid 3-finger tap sequence that just completed
-      _potentialThreeFingerTap = false;
-      _threeFingerTapTimer?.cancel();
-      _log.fine('All pointers up, but not a valid three-finger tap.');
-    }
-    // If some fingers are still down, do nothing until the last one is lifted
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    _log.warning('Pointer cancel: ${event.pointer}');
-    _activePointers.remove(event.pointer);
-    // If a potential tap was in progress, cancel it
-    if (_potentialThreeFingerTap) {
-      _log.warning(
-          'Cancelling potential three-finger tap due to pointer cancel.');
-      _potentialThreeFingerTap = false;
-      _threeFingerTapTimer?.cancel();
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: _handlePointerDown,
-      onPointerUp: _handlePointerUp,
-      onPointerCancel: _handlePointerCancel,
-      // AbsorbPointer prevents the Listener from blocking webview interaction,
-      // but we need the pointer events. Behavior 'translucent' allows events
-      // to pass through to the webview *and* be caught by the Listener.
-      behavior: HitTestBehavior.translucent,
-      child: InAppWebView(
-        initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
-        initialSettings: InAppWebViewSettings(
-          useHybridComposition: true, // Essential for AndroidView interaction
-          javaScriptEnabled: true,
-          transparentBackground: true,
-          // Add other settings as needed
-        ),
-        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-          Factory<VerticalDragGestureRecognizer>(
-            () => VerticalDragGestureRecognizer(),
-          ),
-          Factory<HorizontalDragGestureRecognizer>(
-            () => HorizontalDragGestureRecognizer(),
-          ),
-          // Add other recognizers if necessary, e.g., ScaleGestureRecognizer
-        },
-        onWebViewCreated: (controller) {
-          _androidController = controller;
-          _log.info('Android InAppWebViewController created.');
-        },
-        onLoadStop: (controller, url) async {
-          final currentUrl = url?.toString() ?? '';
-          _log.info('Android WebView finished loading: $currentUrl');
-          // Notify parent widget via callback
-          widget.onPageFinished?.call(currentUrl);
-          // Also update WebSocket service
-          WebSocketService.getInstance().updateCurrentUrl(currentUrl);
-        },
-        onProgressChanged: (controller, progress) {
-          // Handle progress updates if needed
-        },
-        onReceivedHttpError: (controller, request, errorResponse) {
-          _log.severe(
-              'HTTP Error: ${errorResponse.statusCode} for ${request.url}');
-        },
-        onReceivedError: (controller, request, error) {
-          _log.severe(
-              'Load Error: ${error.type} ${error.description} for ${request.url}');
-        },
-        // Add other callbacks as needed (e.g., onConsoleMessage)
-        onConsoleMessage: (controller, consoleMessage) {
-          _log.fine(
-              '[WebView Console] ${consoleMessage.messageLevel}: ${consoleMessage.message}');
-        },
+    return InAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
+      initialSettings: InAppWebViewSettings(
+        useHybridComposition: true,
+        javaScriptEnabled: true,
+        transparentBackground: true,
       ),
+      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+        Factory<VerticalDragGestureRecognizer>(
+          () => VerticalDragGestureRecognizer(),
+        ),
+        Factory<HorizontalDragGestureRecognizer>(
+          () => HorizontalDragGestureRecognizer(),
+        ),
+      },
+      onWebViewCreated: (controller) {
+        _androidController = controller;
+        _log.info('Android InAppWebViewController created.');
+
+        _androidController!.addJavaScriptHandler(
+            handlerName: 'threeFingerTapHandler',
+            callback: (args) {
+              _log.info('JavaScript handler "threeFingerTapHandler" called!');
+              if (mounted) {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (context) => const LogViewerScreen(),
+                ));
+              } else {
+                _log.warning(
+                    'Context not mounted, cannot navigate to LogViewerScreen from JS handler.');
+              }
+            });
+        _log.info('Registered JS handler "threeFingerTapHandler".');
+      },
+      onLoadStop: (controller, url) async {
+        final currentUrl = url?.toString() ?? '';
+        _log.info('Android WebView finished loading: $currentUrl');
+        widget.onPageFinished?.call(currentUrl);
+        WebSocketService.getInstance().updateCurrentUrl(currentUrl);
+
+        _injectGestureDetectionScript(controller);
+      },
+      onProgressChanged: (controller, progress) {},
+      onReceivedHttpError: (controller, request, errorResponse) {
+        _log.severe(
+            'HTTP Error: ${errorResponse.statusCode} for ${request.url}');
+      },
+      onReceivedError: (controller, request, error) {
+        _log.severe(
+            'Load Error: ${error.type} ${error.description} for ${request.url}');
+      },
+      onConsoleMessage: (controller, consoleMessage) {
+        _log.fine(
+            '[WebView Console] ${consoleMessage.messageLevel}: ${consoleMessage.message}');
+      },
     );
+  }
+
+  void _injectGestureDetectionScript(InAppWebViewController controller) {
+    const String jsCode = '''
+      (function() {
+        // Prevent multiple initializations
+        if (window._threeFingerTapInitialized) {
+          console.log('Three-finger tap detector already initialized.');
+          return;
+        }
+        window._threeFingerTapInitialized = true;
+        console.log('Initializing three-finger tap detector...');
+
+        let activeTouches = 0;
+        let potentialTap = false;
+        let tapStartedWithThree = false;
+        let tapTimer = null;
+        const tapTimeoutMs = 300; // Match Flutter timeout
+
+        function handleTouchStart(event) {
+          activeTouches = event.touches.length;
+          console.log('touchstart - activeTouches:', activeTouches);
+
+          if (activeTouches === 3) {
+            console.log('Potential 3-finger tap START');
+            potentialTap = true;
+            tapStartedWithThree = true;
+            clearTimeout(tapTimer);
+            tapTimer = setTimeout(() => {
+              console.log('3-finger tap TIMEOUT');
+              potentialTap = false;
+              tapStartedWithThree = false;
+            }, tapTimeoutMs);
+          } else {
+            // If touches change to something other than 3, cancel potential tap
+            if (potentialTap) {
+               console.log('Touch count changed to ' + activeTouches + ', cancelling potential tap.');
+               potentialTap = false;
+               tapStartedWithThree = false;
+               clearTimeout(tapTimer);
+            }
+            // Ensure flag is false if not starting with 3 touches
+            tapStartedWithThree = false;
+          }
+        }
+
+        function handleTouchEnd(event) {
+          const touchesBeforeEnd = activeTouches;
+          // event.touches tracks remaining touches, not total lifted in this event
+          activeTouches = event.touches.length;
+          console.log('touchend - touchesBeforeEnd:', touchesBeforeEnd, 'activeTouchesAfter:', activeTouches, 'tapStartedWithThree:', tapStartedWithThree, 'potentialTap:', potentialTap);
+
+          if (potentialTap && tapStartedWithThree && activeTouches === 0) {
+            console.log('>>> SUCCESS: 3-finger tap detected via JS! <<<');
+            clearTimeout(tapTimer);
+            potentialTap = false;
+            tapStartedWithThree = false; // <<< RESET FLAG >>>
+            if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+              console.log('Calling Flutter handler: threeFingerTapHandler');
+              window.flutter_inappwebview.callHandler('threeFingerTapHandler');
+            } else {
+              console.error('Flutter InAppWebView handler not available.');
+            }
+          } else if (activeTouches === 0) {
+             // All fingers lifted, but not a valid tap sequence
+             if (potentialTap || tapStartedWithThree) {
+                console.log('All fingers up, but not a valid 3-finger tap sequence. Resetting.');
+                potentialTap = false;
+                tapStartedWithThree = false;
+                clearTimeout(tapTimer);
+             }
+          }
+          // If potentialTap is true but activeTouches > 0, do nothing yet
+        }
+
+        function handleTouchCancel(event) {
+          console.warn('touchcancel - activeTouches before:', activeTouches);
+          activeTouches = event.touches.length; // Update count based on remaining touches
+          console.warn('touchcancel - activeTouches after:', activeTouches);
+          if (potentialTap || tapStartedWithThree) {
+            console.warn('Cancelling potential 3-finger tap due to touchcancel.');
+            potentialTap = false;
+            tapStartedWithThree = false;
+            clearTimeout(tapTimer);
+          }
+        }
+
+        // Add listeners to the document
+        document.addEventListener('touchstart', handleTouchStart, { passive: true });
+        document.addEventListener('touchend', handleTouchEnd, { passive: true });
+        document.addEventListener('touchcancel', handleTouchCancel, { passive: true });
+
+        console.log('Three-finger tap detector listeners added.');
+      })();
+    ''';
+
+    controller.evaluateJavascript(source: jsCode).then((result) {
+      _log.info('JavaScript gesture detection script injected.');
+    }).catchError((error) {
+      _log.severe(
+          'Error injecting JavaScript gesture detection script: $error');
+    });
   }
 }

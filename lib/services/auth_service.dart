@@ -15,11 +15,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:logging/logging.dart'; // Import logging
+import 'package:logging/logging.dart';
 import '../secure_token_storage.dart';
 import '../oauth_config.dart';
 
-// Logger instance
 final _log = Logger('AuthService');
 
 enum AuthState {
@@ -52,7 +51,6 @@ class AuthService with ChangeNotifier {
     return OAuthConfig.buildRedirectUri(_hassUrl!);
   }
 
-  /// Start the platform-specific authentication flow.
   Future<String?> startAuthFlow() async {
     if (_hassUrl == null) {
       throw StateError('Home Assistant URL not set.');
@@ -142,16 +140,15 @@ class AuthService with ChangeNotifier {
         },
       );
       _log.fine(
-          'Token endpoint response: status=${response.statusCode}, body=${response.body}'); // Fine level for potentially sensitive body
+          'Token endpoint response: status=${response.statusCode}, body=${response.body}');
       if (response.statusCode == 200) {
         _tokens = json.decode(response.body);
-        _log.info(
-            'Tokens received successfully.'); // Don't log tokens themselves
+        _log.info('Tokens received successfully.');
         await SecureTokenStorage.saveTokens(response.body);
         _updateTokenExpiryTime();
         final verify = await SecureTokenStorage.readTokens();
         _log.fine(
-            'SecureTokenStorage.readTokens after save: ${verify != null ? "found" : "not found"}'); // Don't log tokens
+            'SecureTokenStorage.readTokens after save: ${verify != null ? "found" : "not found"}');
         _state = AuthState.authenticated;
         _errorMessage = null;
       } else {
@@ -175,14 +172,14 @@ class AuthService with ChangeNotifier {
     _log.info('loadTokens called');
     final jsonStr = await SecureTokenStorage.readTokens();
     _log.fine(
-        'SecureTokenStorage.readTokens returned: ${jsonStr != null ? "found" : "not found"}'); // Don't log tokens
+        'SecureTokenStorage.readTokens returned: ${jsonStr != null ? "found" : "not found"}');
     if (jsonStr != null) {
       try {
         _tokens = json.decode(jsonStr);
         _updateTokenExpiryTime();
       } catch (e, stackTrace) {
         _log.severe('Error decoding stored tokens.', e, stackTrace);
-        await logout(); // Logout will clear state and notify
+        await logout();
         return;
       }
       final prefs = await SharedPreferences.getInstance();
@@ -193,11 +190,11 @@ class AuthService with ChangeNotifier {
         _log.info('Tokens and URL loaded: $_hassUrl');
       } else {
         _log.warning('No Home Assistant URL found in prefs.');
-        _tokens = null; // Ensure tokens are null if URL is missing
+        _tokens = null;
         _hassUrl = null;
         _state = AuthState.unauthenticated;
-        await logout(); // Logout will clear state and notify
-        return; // Return after logout
+        await logout();
+        return;
       }
     } else {
       _tokens = null;
@@ -271,7 +268,7 @@ class AuthService with ChangeNotifier {
       );
 
       _log.fine(
-          'Refresh token response: status=${response.statusCode}, body=${response.body}'); // Fine level for potentially sensitive body
+          'Refresh token response: status=${response.statusCode}, body=${response.body}');
 
       if (response.statusCode == 200) {
         _tokens = json.decode(response.body);
@@ -282,24 +279,23 @@ class AuthService with ChangeNotifier {
               'Refresh response missing refresh_token, preserving old one.');
         }
         await SecureTokenStorage.saveTokens(json.encode(_tokens));
-        _updateTokenExpiryTime(); // This already logs expiry calculation
+        _updateTokenExpiryTime();
         _log.info('Token refresh successful.');
         notifyListeners();
         return true;
       } else {
         _log.severe(
             'Refresh failed: Server returned status ${response.statusCode}. Body: ${response.body}');
-        await logout(); // Logout clears state and notifies
+        await logout();
         _errorMessage = 'Authentication expired. Please log in again.';
-        _state = AuthState.error; // State is set by logout, but be explicit
-        // notifyListeners(); // Already called by logout
+        _state = AuthState.error;
         return false;
       }
     } catch (e, stackTrace) {
       _log.severe('Exception during token refresh.', e, stackTrace);
       _errorMessage = 'Network error during token refresh: $e';
       _state = AuthState.error;
-      notifyListeners(); // Notify about the error state
+      notifyListeners();
       return false;
     }
   }
@@ -350,7 +346,6 @@ class AuthService with ChangeNotifier {
       } catch (e, stackTrace) {
         _log.warning('Error during cleanup.', e, stackTrace);
       } finally {
-        // Check state *after* potential error logging
         if (!codeHandled && _state == AuthState.authenticating) {
           _log.info('Auth cancelled or failed during cleanup');
           _state = AuthState.unauthenticated;
@@ -388,7 +383,7 @@ class AuthService with ChangeNotifier {
     });
 
     _linuxAuthWebview!.onClose.whenComplete(() {
-      _log.fine('WebView closed.'); // Use fine level
+      _log.fine('WebView closed.');
       if (!codeHandled && _state == AuthState.authenticating) {
         _log.info('Auth cancelled by user closing window.');
         _state = AuthState.unauthenticated;
@@ -397,9 +392,8 @@ class AuthService with ChangeNotifier {
       }
       cleanup();
     });
-    // TODO: Remove duplicate onClose listener if not needed
     _linuxAuthWebview!.onClose.whenComplete(() {
-      _log.fine('WebView closed (duplicate listener).'); // Use fine level
+      _log.fine('WebView closed (duplicate listener).');
       if (!codeHandled && _state == AuthState.authenticating) {
         _log.info(
             'Auth cancelled by user closing window (duplicate listener).');

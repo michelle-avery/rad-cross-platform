@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
-import '../main.dart'; // To access the global inMemoryLogHandler
-import '../logging/in_memory_log_handler.dart'; // For formatRecord
+import '../main.dart';
+import '../logging/in_memory_log_handler.dart';
 
 class LogViewerScreen extends StatefulWidget {
   const LogViewerScreen({super.key});
@@ -16,7 +16,6 @@ class _LogViewerScreenState extends State<LogViewerScreen> {
   @override
   void initState() {
     super.initState();
-    // Optionally scroll to bottom when the screen is first built
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
@@ -38,7 +37,6 @@ class _LogViewerScreenState extends State<LogViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Use ListenableBuilder or similar if handler becomes a ChangeNotifier
     final records = inMemoryLogHandler.records;
 
     return Scaffold(
@@ -65,11 +63,10 @@ class _LogViewerScreenState extends State<LogViewerScreen> {
           final formattedRecord = InMemoryLogHandler.formatRecord(record);
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            // Using SelectableText to allow copying log messages
             child: SelectableText(
               formattedRecord,
               style: TextStyle(
-                fontFamily: 'monospace', // Use a monospace font for logs
+                fontFamily: 'monospace',
                 fontSize: 12.0,
                 color: _getColorForLevel(record.level),
               ),

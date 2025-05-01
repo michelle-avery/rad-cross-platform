@@ -7,14 +7,12 @@ import 'providers/app_state_provider.dart';
 import 'services/auth_service.dart';
 import 'screens/app_shell.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:io'; // For Platform checks
-import 'dart:developer' as developer; // For Android console logging
-import 'package:logging/logging.dart'; // Logging package
-import 'package:path_provider/path_provider.dart'; // For directory path
-import 'package:path/path.dart' as p; // For path joining
-import 'logging/in_memory_log_handler.dart'; // Import the handler
-import 'logging/file_log_handler.dart'; // Import the file handler
-import 'dart:convert';
+import 'dart:developer' as developer;
+import 'package:logging/logging.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'logging/in_memory_log_handler.dart';
+import 'logging/file_log_handler.dart';
 
 final InMemoryLogHandler inMemoryLogHandler = InMemoryLogHandler();
 FileLogHandler? fileLogHandler;
@@ -175,7 +173,6 @@ Future<void> _setupLogging(bool isDebug) async {
         exit(0);
       });
     } catch (e, stackTrace) {
-      // Use the logger itself to report the failure
       Logger('main').severe(
           '!!! Failed to initialize Linux file logging.', e, stackTrace);
       Logger.root.onRecord.listen((record) {
@@ -192,23 +189,21 @@ Future<void> _setupLogging(bool isDebug) async {
           "Linux file logging failed. Using fallback console logging.");
     }
   } else if (Platform.isAndroid) {
-    // Console handler (prints to adb logcat)
     Logger.root.onRecord.listen((record) {
-      developer.log(
-        record.message,
-        time: record.time,
-        level: record.level.value,
-        name: record.loggerName,
-        error: record.error,
-        stackTrace: record.stackTrace,
-      );
-      // Add record to the in-memory handler
+      print(
+          '${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}');
+      if (record.error != null) {
+        print('  Error: ${record.error}');
+      }
+      if (record.stackTrace != null) {
+        print('  Stack trace:\n${record.stackTrace}');
+      }
+
       inMemoryLogHandler.handleRecord(record);
     });
     Logger('main').info(
-        "Android platform detected. Console logging active. In-memory placeholder active.");
+        "Android platform detected. Using print() for console logging. In-memory handler active.");
   } else {
-    // Default/Fallback handler (e.g., for macOS/Windows development) - Use developer.log
     Logger.root.onRecord.listen((record) {
       developer.log(
         record.message,

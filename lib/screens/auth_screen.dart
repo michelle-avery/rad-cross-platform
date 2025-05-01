@@ -5,6 +5,9 @@ import '../providers/app_state_provider.dart';
 import '../services/auth_service.dart';
 import 'oauth_webview_screen.dart';
 import 'dart:io';
+import 'package:logging/logging.dart';
+
+final _log = Logger('AuthScreen');
 
 const Color primaryColor = Color(0xFF40C4FF);
 const Color lightBlue = Color(0xFFE1F5FE);
@@ -80,17 +83,13 @@ class _AuthScreenState extends State<AuthScreen> {
           throw StateError('startAuthflow returned null for Android');
         }
         void handleAndroidAuthCode(String code, String state) async {
-          // Check mounted before handling code
           if (!mounted) return;
           try {
-            // Get authService again within the callback scope if needed,
-            // or ensure it's captured correctly.
             final authService =
                 Provider.of<AuthService>(context, listen: false);
             await authService.handleAuthCode(code, state);
-            // No need to pop here, OAuthWebViewScreen handles popping itself.
-          } catch (e) {
-            print('[AuthScreen] Error handling auth code from Android: $e');
+          } catch (e, s) {
+            _log.severe('Error handling auth code from Android: $e', e, s);
             if (mounted) {
               setState(() {
                 _errorMessage = 'Authentication failed: ${e.toString()}';
@@ -100,7 +99,6 @@ class _AuthScreenState extends State<AuthScreen> {
           }
         }
 
-        // Ensure the context is still valid before navigating
         if (!mounted) return;
         await Navigator.push(
           context,
@@ -122,11 +120,10 @@ class _AuthScreenState extends State<AuthScreen> {
           });
         }
       } else if (Platform.isLinux) {
-        print('[AuthScreen] Linux auth flow initiated by AuthService.');
+        _log.info('Linux auth flow initiated by AuthService.');
       }
-    } catch (e) {
-      print('[AuthScreen] Login Error: $e');
-      // Re-check mounted status after async gap
+    } catch (e, s) {
+      _log.severe('Login Error: $e', e, s);
       if (mounted) {
         setState(() {
           _errorMessage = 'Login failed: ${e.toString()}';

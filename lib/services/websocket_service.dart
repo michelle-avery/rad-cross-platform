@@ -3,12 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:radcxp/services/auth_service.dart';
-import 'package:logging/logging.dart'; // Import logging
+import 'package:logging/logging.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
 
-// Logger instance
 final _log = Logger('WebSocketService');
 
 class _PendingCommand {
@@ -84,16 +83,10 @@ class WebSocketService {
         _handleDisconnect(scheduleReconnect: false);
         return;
       }
-      _log.fine(
-          'Using valid access token: ${_token!.substring(0, 10)}...'); // Fine level for potentially sensitive info
+      _log.fine('Using valid access token: ${_token!.substring(0, 10)}...');
 
-      // TODO: Implement proper certificate validation for production.
-      // Consider making this configurable or using platform-specific trust mechanisms.
-      // Removed badCertificateCallback to enforce valid SSL certificates.
       final httpClient = HttpClient();
-      // final socket = await WebSocket.connect(_wsUrl!); // Use default client
-      final socket = await WebSocket.connect(_wsUrl!,
-          customClient: httpClient); // Or pass the default client explicitly
+      final socket = await WebSocket.connect(_wsUrl!, customClient: httpClient);
       _channel = IOWebSocketChannel(socket);
 
       _log.info('Connection established, waiting for messages...');
@@ -148,7 +141,7 @@ class WebSocketService {
 
   void dispose() {
     _log.info('Disposing...');
-    disconnect(); // disconnect already logs
+    disconnect();
     _messageController.close();
     _navigationTargetController.close();
     _instance = null;
@@ -156,8 +149,7 @@ class WebSocketService {
 
   void _handleMessage(Map<String, dynamic> message) {
     final messageType = message['type'] as String?;
-    _log.fine(
-        'Received message type: $messageType'); // Fine for frequent messages
+    _log.fine('Received message type: $messageType');
 
     switch (messageType) {
       case 'auth_required':
@@ -229,19 +221,17 @@ class WebSocketService {
             _log.warning('Received navigate command with missing/empty path.');
           }
         } else {
-          // Log other events if needed, or just pass them through
           _log.fine('Received unhandled event command: $command');
           _messageController.add(message);
         }
         break;
       case 'pong':
         final id = message['id'] as int?;
-        _log.finest(
-            'Received pong for id: $id'); // Finest for very frequent/low-level
+        _log.finest('Received pong for id: $id');
         break;
       default:
         _log.warning('Received unhandled message type: $messageType');
-        _messageController.add(message); // Still forward if needed
+        _messageController.add(message);
         break;
     }
   }
@@ -251,7 +241,7 @@ class WebSocketService {
       _log.info('Sending auth message...');
       final authMessage = jsonEncode({
         'type': 'auth',
-        'access_token': _token, // Token itself is not logged
+        'access_token': _token,
       });
       _channel?.sink.add(authMessage);
     } else {
@@ -262,7 +252,6 @@ class WebSocketService {
 
   void _handleDisconnect({bool scheduleReconnect = true}) {
     if (!_connected && _reconnectTimer != null && _reconnectTimer!.isActive) {
-      // Already handling disconnect or reconnect scheduled, avoid redundant logging/actions
       return;
     }
     _log.info('Handling disconnect. Schedule reconnect: $scheduleReconnect');
@@ -291,13 +280,13 @@ class WebSocketService {
     _log.info(
         'Starting heartbeat timer (${_heartbeatInterval.inSeconds}s interval).');
     _pingTimer = Timer.periodic(_heartbeatInterval, (_) => _sendPing());
-    _sendPing(); // _sendPing logs its own messages
+    _sendPing();
   }
 
   void _sendPing() {
     if (_connected && _channel != null) {
       final pingId = _commandId++;
-      _log.finest('Sending ping (id: $pingId)...'); // Finest for frequent pings
+      _log.finest('Sending ping (id: $pingId)...');
       try {
         final pingMessage = jsonEncode({
           'id': pingId,
@@ -306,11 +295,11 @@ class WebSocketService {
         _channel!.sink.add(pingMessage);
       } catch (e, stackTrace) {
         _log.severe('Error sending ping.', e, stackTrace);
-        _handleDisconnect(); // Disconnect on error
+        _handleDisconnect();
       }
     } else {
       _log.warning('Cannot send ping - not connected.');
-      _pingTimer?.cancel(); // Stop trying if not connected
+      _pingTimer?.cancel();
     }
   }
 
@@ -324,13 +313,12 @@ class WebSocketService {
     try {
       await registerDisplay(
         deviceId: _deviceId!,
-      ); // registerDisplay logs its own messages
+      );
       _log.info('Registration command sent successfully.');
 
       try {
         _log.info('Fetching display settings...');
         final settingsResult = await getDisplaySettings(deviceId: _deviceId!);
-        // getDisplaySettings logs its own messages
         final settings = settingsResult['settings'] as Map<String, dynamic>?;
         final defaultDashboard = settings?['default_dashboard'] as String?;
 
@@ -344,9 +332,9 @@ class WebSocketService {
         _log.severe('Failed to get display settings.', e, stackTrace);
       }
 
-      await _subscribeToEventsSafe(); // subscribeToEventsSafe logs its own messages
+      await _subscribeToEventsSafe();
       _log.info('Initialization complete, starting heartbeat.');
-      _startHeartbeat(); // _startHeartbeat logs its own messages
+      _startHeartbeat();
     } catch (e, stackTrace) {
       _log.severe(
           'Error during _registerAndInitialize (registration or settings).',
@@ -359,9 +347,7 @@ class WebSocketService {
     if (_deviceId != null) {
       try {
         await subscribeToEvents(deviceId: _deviceId!);
-        // subscribeToEvents logs its own success/failure
       } catch (e, stackTrace) {
-        // Log the error here if subscribeToEvents rethrows
         _log.severe(
             'Subscription failed in _subscribeToEventsSafe.', e, stackTrace);
       }
@@ -393,8 +379,7 @@ class WebSocketService {
         _PendingCommand(Completer<Map<String, dynamic>>(), commandType);
     _pendingCommands[commandId] = pendingCommand;
 
-    _log.fine(
-        'Sending command (id: $commandId): ${commandToSend['type']}'); // Fine for commands
+    _log.fine('Sending command (id: $commandId): ${commandToSend['type']}');
 
     try {
       final message = jsonEncode(commandToSend);
@@ -408,15 +393,14 @@ class WebSocketService {
       });
       return result;
     } catch (e, stackTrace) {
-      _pendingCommands.remove(commandId); // Ensure cleanup on error
+      _pendingCommands.remove(commandId);
       if (e is TimeoutException) {
-        // TimeoutException is already logged by the timeout callback, avoid duplicate severe log
         _log.warning(
             'Command $commandId (${commandToSend['type']}) timed out.');
       } else {
         _log.severe('Error sending command $commandId.', e, stackTrace);
       }
-      rethrow; // Rethrow the original exception
+      rethrow;
     }
   }
 
@@ -435,8 +419,7 @@ class WebSocketService {
         'Registering display (sending remote_assist_display/register)...');
     try {
       final result = await sendCommand(command);
-      _log.fine(
-          'Display registration successful: $result'); // Fine for result details
+      _log.fine('Display registration successful: $result');
       return result;
     } catch (e, stackTrace) {
       _log.severe('Display registration failed.', e, stackTrace);
@@ -456,11 +439,9 @@ class WebSocketService {
         'Subscribing to events (sending remote_assist_display/connect) for device $deviceId...');
     try {
       final result = await sendCommand(command);
-      _log.fine(
-          'Event subscription successful: $result'); // Fine for result details
+      _log.fine('Event subscription successful: $result');
       return result;
     } catch (e, stackTrace) {
-      // sendCommand already logs the error, but we log specifically for subscription failure context
       _log.severe('Event subscription failed.', e, stackTrace);
       rethrow;
     }
@@ -477,7 +458,7 @@ class WebSocketService {
         'Getting display settings (sending remote_assist_display/settings)...');
     try {
       final result = await sendCommand(command);
-      _log.fine('Get settings successful: $result'); // Fine for result details
+      _log.fine('Get settings successful: $result');
       if (result.containsKey('settings') &&
           result['settings'] is Map<String, dynamic>) {
         return result;
@@ -487,7 +468,6 @@ class WebSocketService {
             code: 'invalid_response');
       }
     } catch (e, stackTrace) {
-      // sendCommand already logs the error, but we log specifically for settings failure context
       _log.severe('Get settings failed.', e, stackTrace);
       rethrow;
     }
@@ -515,16 +495,10 @@ class WebSocketService {
 
     _log.info('Sending URL update (remote_assist_display/update)... URL: $url');
     try {
-      // Use sendCommand without await if we don't need the result immediately
-      // and want to avoid blocking if the command takes time.
-      // However, awaiting helps ensure the command was at least attempted to be sent.
       await sendCommand(command, timeout: const Duration(seconds: 5));
-      _log.fine(
-          'URL update command sent successfully.'); // Fine for success confirmation
+      _log.fine('URL update command sent successfully.');
     } catch (e, stackTrace) {
-      // sendCommand logs the error, but we add context
       _log.severe('Failed to send URL update command.', e, stackTrace);
-      // Decide if rethrowing is necessary. Here, maybe not, as it's an update.
     }
   }
 }
