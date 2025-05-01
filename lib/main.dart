@@ -14,13 +14,81 @@ import 'package:path_provider/path_provider.dart'; // For directory path
 import 'package:path/path.dart' as p; // For path joining
 import 'logging/in_memory_log_handler.dart'; // Import the handler
 import 'logging/file_log_handler.dart'; // Import the file handler
+import 'dart:convert';
 
-// Global instance for simplicity, might be better managed via Provider later
 final InMemoryLogHandler inMemoryLogHandler = InMemoryLogHandler();
-FileLogHandler? fileLogHandler; // Global instance for file handler (nullable)
+FileLogHandler? fileLogHandler;
+
+class MyHttpOverrides extends HttpOverrides {
+  final List<Uint8List> trustedCertBytes;
+
+  MyHttpOverrides(this.trustedCertBytes);
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    SecurityContext effectiveContext =
+        context ?? SecurityContext.defaultContext;
+
+    if (Platform.isAndroid && trustedCertBytes.isNotEmpty) {
+      Logger('MyHttpOverrides')
+          .info('Applying custom SecurityContext for Android HttpClient.');
+      effectiveContext = SecurityContext(withTrustedRoots: true);
+      try {
+        for (final certBytes in trustedCertBytes) {
+          effectiveContext.setTrustedCertificatesBytes(certBytes);
+        }
+        Logger('MyHttpOverrides').fine(
+            'Successfully added ${trustedCertBytes.length} custom CAs to SecurityContext.');
+      } catch (e, s) {
+        Logger('MyHttpOverrides').severe(
+            'Error setting trusted certificates in SecurityContext.', e, s);
+        effectiveContext = context ?? SecurityContext.defaultContext;
+      }
+    } else if (Platform.isAndroid) {
+      Logger('MyHttpOverrides').warning(
+          'Android platform detected, but no custom certificate bytes provided to HttpOverrides.');
+    }
+
+    final client = super.createHttpClient(effectiveContext);
+
+    client.badCertificateCallback =
+        (X509Certificate cert, String host, int port) {
+      Logger('MyHttpOverrides').severe(
+          'badCertificateCallback triggered! Cert: ${cert.subject}, Host: $host:$port. This indicates a trust issue despite custom CAs/NSC.');
+      return false;
+    };
+
+    return client;
+  }
+}
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  List<Uint8List> customCertBytes = [];
+  if (Platform.isAndroid) {
+    try {
+      Logger('main').info('Loading custom CA certificates for Android...');
+      final ByteData isrgData =
+          await rootBundle.load('assets/certs/isrgrootx1.pem');
+      customCertBytes.add(isrgData.buffer.asUint8List());
+      Logger('main').fine('Loaded isrgrootx1.pem');
+
+      final ByteData r10Data = await rootBundle.load('assets/certs/r10.pem');
+      customCertBytes.add(r10Data.buffer.asUint8List());
+      Logger('main').fine('Loaded r10.pem');
+
+      Logger('main').info(
+          'Successfully loaded ${customCertBytes.length} custom CA certificates.');
+    } catch (e, s) {
+      Logger('main')
+          .severe('Failed to load custom CA certificates from assets.', e, s);
+    }
+  }
+
+  HttpOverrides.global = MyHttpOverrides(customCertBytes);
+  Logger('main').info(
+      'Applied custom HttpOverrides${customCertBytes.isNotEmpty ? ' with custom CAs' : ''}.');
 
   if (!kIsWeb && (Platform.isLinux || Platform.isMacOS || Platform.isWindows)) {
     if (runWebViewTitleBarWidget(args)) {
@@ -33,10 +101,8 @@ void main(List<String> args) async {
   }
 
   final isDebug = kDebugMode;
-  // Setup logging first, so we can log the mode
   await _setupLogging(isDebug);
 
-  // Log the debug status using the new logger
   Logger('main').info("Running in ${isDebug ? 'debug' : 'release'} mode.");
 
   runApp(
@@ -47,8 +113,6 @@ void main(List<String> args) async {
           create: (context) => AppStateProvider(
             Provider.of<AuthService>(context, listen: false),
           ),
-          // Return the existing instance if available, otherwise create it (via create).
-          // AppStateProvider listens to authService internally.
           update: (context, authService, previousAppState) =>
               previousAppState ?? AppStateProvider(authService),
         ),
@@ -74,18 +138,11 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Logging setup function
 Future<void> _setupLogging(bool isDebug) async {
-  // Set the root level
-  Logger.root.level = isDebug
-      ? Level.ALL
-      : Level.INFO; // Log everything in debug, INFO and above in release
-
-  // Platform-specific handlers
+  Logger.root.level = isDebug ? Level.ALL : Level.INFO;
   if (Platform.isLinux) {
     try {
       final Directory appSupportDir = await getApplicationSupportDirectory();
-      // Consider adding rotation logic later (e.g., based on date or size)
       final String logFilePath =
           p.join(appSupportDir.path, 'logs', 'radcxp.log');
       fileLogHandler = FileLogHandler(logFilePath);
@@ -93,8 +150,6 @@ Future<void> _setupLogging(bool isDebug) async {
 
       Logger.root.onRecord.listen((record) {
         fileLogHandler?.handleRecord(record);
-        // Optionally, also log to console in debug mode for Linux using developer.log
-        // This keeps the format consistent with Android's debug console output
         if (isDebug) {
           developer.log(
             record.message,
@@ -109,27 +164,22 @@ Future<void> _setupLogging(bool isDebug) async {
       Logger('main').info(
           "Linux platform detected. File logging initialized to: $logFilePath");
 
-      // Add hook to close file sink on exit (best effort)
-      // Note: This might not always run, e.g., on force kill.
-      // Consider using WidgetsBindingObserver.didChangeAppLifecycleState for more robustness if needed.
       ProcessSignal.sigint.watch().listen((signal) async {
         Logger('main').info('Received SIGINT, closing log file...');
         await fileLogHandler?.close();
-        exit(0); // Exit after cleanup
+        exit(0);
       });
       ProcessSignal.sigterm.watch().listen((signal) async {
         Logger('main').info('Received SIGTERM, closing log file...');
         await fileLogHandler?.close();
-        exit(0); // Exit after cleanup
+        exit(0);
       });
     } catch (e, stackTrace) {
       // Use the logger itself to report the failure
       Logger('main').severe(
           '!!! Failed to initialize Linux file logging.', e, stackTrace);
-      // Fallback to console logging if file init fails
       Logger.root.onRecord.listen((record) {
         developer.log(
-          // Use developer.log for fallback console too
           record.message,
           time: record.time,
           level: record.level.value,
@@ -139,7 +189,7 @@ Future<void> _setupLogging(bool isDebug) async {
         );
       });
       Logger('main').warning(
-          "Linux file logging failed. Using fallback console logging."); // Warning level seems more appropriate here
+          "Linux file logging failed. Using fallback console logging.");
     }
   } else if (Platform.isAndroid) {
     // Console handler (prints to adb logcat)
