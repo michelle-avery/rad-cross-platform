@@ -1,0 +1,9 @@
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/isrgrootx1" />
+            <certificates src="@raw/r10" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

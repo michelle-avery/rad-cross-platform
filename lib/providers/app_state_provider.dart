@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import 'package:logging/logging.dart';
 import '../services/auth_service.dart';
 import '../services/websocket_service.dart';
+
+final _log = Logger('AppStateProvider');
 
 class AppStateProvider extends ChangeNotifier {
   bool _isConfigured = false;
@@ -23,7 +26,7 @@ class AppStateProvider extends ChangeNotifier {
   String? get deviceId => _deviceId;
 
   AppStateProvider(this._authService) {
-    debugPrint('[AppStateProvider] Constructor called.');
+    _log.fine('Constructor called.');
     _initialize();
   }
 
@@ -36,7 +39,7 @@ class AppStateProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    debugPrint('[AppStateProvider] Disposing...');
+    _log.fine('Disposing...');
     _authService.removeListener(_handleAuthStateChanged);
     WebSocketService.getInstance().dispose();
     super.dispose();
@@ -45,9 +48,9 @@ class AppStateProvider extends ChangeNotifier {
   Future<void> _loadSavedState() async {
     final prefs = await SharedPreferences.getInstance();
     _homeAssistantUrl = prefs.getString(_haUrlKey);
-    debugPrint('[AppStateProvider] Loaded $_haUrlKey: $_homeAssistantUrl');
+    _log.info('Loaded $_haUrlKey: $_homeAssistantUrl');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
-    debugPrint('[AppStateProvider] isConfigured: $_isConfigured');
+    _log.info('isConfigured: $_isConfigured');
   }
 
   Future<void> _loadOrGenerateDeviceId() async {
@@ -59,20 +62,19 @@ class AppStateProvider extends ChangeNotifier {
       if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
         _hostName = androidInfo.host;
-        debugPrint('[AppStateProvider] Hostname: $_hostName');
+        _log.info('Hostname: $_hostName');
       } else if (Platform.isLinux) {
         _hostName = Platform.localHostname;
-        debugPrint('[AppStateProvider] Hostname: $_hostName');
+        _log.info('Hostname: $_hostName');
       } else {
         _hostName = "Unknown";
       }
       final randomID = const Uuid().v4().substring(0, 12);
       _deviceId = 'rad-$randomID-$_hostName';
       await prefs.setString(_deviceIdKey, _deviceId!);
-      debugPrint(
-          '[AppStateProvider] Generated and saved new device ID: $_deviceId');
+      _log.info('Generated and saved new device ID: $_deviceId');
     } else {
-      debugPrint('[AppStateProvider] Retrieved existing device ID: $_deviceId');
+      _log.info('Retrieved existing device ID: $_deviceId');
     }
     notifyListeners();
   }
@@ -83,7 +85,7 @@ class AppStateProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _deviceId = newDeviceId;
       await prefs.setString(_deviceIdKey, _deviceId!);
-      debugPrint('[AppStateProvider] Set device ID override: $_deviceId');
+      _log.info('Set device ID override: $_deviceId');
       notifyListeners();
     }
   }
@@ -93,7 +95,7 @@ class AppStateProvider extends ChangeNotifier {
     _homeAssistantUrl = url;
     _isConfigured = true;
     await prefs.setString(_haUrlKey, url);
-    debugPrint('[AppStateProvider] Saved $_haUrlKey: $_homeAssistantUrl');
+    _log.info('Saved $_haUrlKey: $_homeAssistantUrl');
     notifyListeners();
     _handleAuthStateChanged();
   }
@@ -101,7 +103,7 @@ class AppStateProvider extends ChangeNotifier {
   Future<void> resetConfiguration() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_haUrlKey);
-    debugPrint('[AppStateProvider] Removed $_haUrlKey');
+    _log.info('Removed $_haUrlKey');
     _homeAssistantUrl = null;
     _isConfigured = false;
     notifyListeners();
@@ -109,18 +111,18 @@ class AppStateProvider extends ChangeNotifier {
   }
 
   void _handleAuthStateChanged() {
-    debugPrint(
-        '[AppStateProvider] Handling Auth State Change. AuthState: ${_authService.state}, URL: $_homeAssistantUrl, DeviceID: $_deviceId');
+    _log.info(
+        'Handling Auth State Change. AuthState: ${_authService.state}, URL: $_homeAssistantUrl, DeviceID: $_deviceId');
 
     if (_authService.state != AuthState.authenticated) {
       final wsService = WebSocketService.getInstance();
       if (wsService.isConnected) {
-        debugPrint(
-            '[AppStateProvider] Auth state changed to unauthenticated. Disconnecting WebSocket...');
+        _log.info(
+            'Auth state changed to unauthenticated. Disconnecting WebSocket...');
         Future.microtask(() => wsService.disconnect());
       } else {
-        debugPrint(
-            '[AppStateProvider] Auth state changed to unauthenticated. WebSocket already disconnected.');
+        _log.fine(
+            'Auth state changed to unauthenticated. WebSocket already disconnected.');
       }
     }
   }

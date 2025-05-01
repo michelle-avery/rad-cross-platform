@@ -15,8 +15,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:logging/logging.dart';
 import '../secure_token_storage.dart';
 import '../oauth_config.dart';
+
+final _log = Logger('AuthService');
 
 enum AuthState {
   unauthenticated,
@@ -48,7 +51,6 @@ class AuthService with ChangeNotifier {
     return OAuthConfig.buildRedirectUri(_hassUrl!);
   }
 
-  /// Start the platform-specific authentication flow.
   Future<String?> startAuthFlow() async {
     if (_hassUrl == null) {
       throw StateError('Home Assistant URL not set.');
@@ -57,15 +59,15 @@ class AuthService with ChangeNotifier {
 
     _pendingState = OAuthConfig.generateState();
     final authUrl = OAuthConfig.buildAuthUrl(_hassUrl!, _pendingState!);
-    print('[AuthService] Generated Auth URL state: $_pendingState');
+    _log.info('Generated Auth URL state: $_pendingState');
     _state = AuthState.authenticating;
     notifyListeners();
 
     if (Platform.isAndroid) {
-      print('[AuthService] Starting Android auth flow, returning URL.');
+      _log.info('Starting Android auth flow, returning URL.');
       return authUrl;
     } else if (Platform.isLinux) {
-      print('[AuthService] Starting Linux auth flow internally.');
+      _log.info('Starting Linux auth flow internally.');
       _startLinuxAuthFlowInternal(authUrl);
       return null;
     } else {
@@ -88,10 +90,10 @@ class AuthService with ChangeNotifier {
         normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length - 1);
       }
       _hassUrl = normalizedUrl;
-      print('[AuthService] URL set and validated: $_hassUrl');
+      _log.info('URL set and validated: $_hassUrl');
       return _hassUrl!;
-    } catch (e) {
-      print('[AuthService] URL validation failed: $e');
+    } catch (e, stackTrace) {
+      _log.severe('URL validation failed.', e, stackTrace);
       throw FormatException('Invalid URL format: ${e.toString()}');
     }
   }
@@ -109,16 +111,15 @@ class AuthService with ChangeNotifier {
         'state': _pendingState,
       },
     );
-    print('[AuthService] Generated Auth URL state: $_pendingState');
+    _log.info('Generated Auth URL state: $_pendingState');
     return authUri.toString();
   }
 
   Future<void> handleAuthCode(String code, String receivedState) async {
-    print(
-        '[AuthService] handleAuthCode called with code=$code, state=$receivedState');
+    _log.info('handleAuthCode called with code=$code, state=$receivedState');
     if (receivedState != _pendingState) {
-      print(
-          '[AuthService] State mismatch: expected $_pendingState, got $receivedState');
+      _log.warning(
+          'State mismatch: expected $_pendingState, got $receivedState');
       _state = AuthState.error;
       _errorMessage = 'State mismatch. Possible CSRF attack.';
       notifyListeners();
@@ -127,7 +128,7 @@ class AuthService with ChangeNotifier {
     _state = AuthState.exchanging;
     notifyListeners();
     try {
-      print('[AuthService] Exchanging code for tokens...');
+      _log.info('Exchanging code for tokens...');
       final response = await http.post(
         Uri.parse('$_hassUrl/auth/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -138,24 +139,26 @@ class AuthService with ChangeNotifier {
           'redirect_uri': OAuthConfig.redirectUri,
         },
       );
-      print(
-          '[AuthService] Token endpoint response: status=${response.statusCode}, body=${response.body}');
+      _log.fine(
+          'Token endpoint response: status=${response.statusCode}, body=${response.body}');
       if (response.statusCode == 200) {
         _tokens = json.decode(response.body);
-        print('[AuthService] Tokens received: ${json.encode(_tokens)}');
+        _log.info('Tokens received successfully.');
         await SecureTokenStorage.saveTokens(response.body);
         _updateTokenExpiryTime();
         final verify = await SecureTokenStorage.readTokens();
-        print(
-            '[AuthService] SecureTokenStorage.readTokens after save: $verify');
+        _log.fine(
+            'SecureTokenStorage.readTokens after save: ${verify != null ? "found" : "not found"}');
         _state = AuthState.authenticated;
         _errorMessage = null;
       } else {
         _state = AuthState.error;
         _errorMessage = 'Token exchange failed: ${response.body}';
+        _log.severe(
+            'Token exchange failed: ${response.statusCode} ${response.body}');
       }
-    } catch (e) {
-      print('[AuthService] Exception during token exchange: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Exception during token exchange.', e, stackTrace);
       _state = AuthState.error;
       _errorMessage = 'Network error: $e';
     }
@@ -166,15 +169,16 @@ class AuthService with ChangeNotifier {
   }
 
   Future<void> loadTokens() async {
-    print('[AuthService] loadTokens called');
+    _log.info('loadTokens called');
     final jsonStr = await SecureTokenStorage.readTokens();
-    print('[AuthService] SecureTokenStorage.readTokens returned: $jsonStr');
+    _log.fine(
+        'SecureTokenStorage.readTokens returned: ${jsonStr != null ? "found" : "not found"}');
     if (jsonStr != null) {
       try {
         _tokens = json.decode(jsonStr);
         _updateTokenExpiryTime();
-      } catch (e) {
-        print('[AuthService] Error decoding stored tokens: $e');
+      } catch (e, stackTrace) {
+        _log.severe('Error decoding stored tokens.', e, stackTrace);
         await logout();
         return;
       }
@@ -183,19 +187,20 @@ class AuthService with ChangeNotifier {
 
       if (_hassUrl != null && _hassUrl!.isNotEmpty) {
         _state = AuthState.authenticated;
-        print('[AuthService] Tokens and URL loaded: $_hassUrl');
+        _log.info('Tokens and URL loaded: $_hassUrl');
       } else {
-        print('[AuthService] No Home Assistant URL found in prefs.');
+        _log.warning('No Home Assistant URL found in prefs.');
         _tokens = null;
         _hassUrl = null;
         _state = AuthState.unauthenticated;
         await logout();
+        return;
       }
     } else {
       _tokens = null;
       _hassUrl = null;
       _state = AuthState.unauthenticated;
-      print('[AuthService] No tokens found, state set to unauthenticated');
+      _log.info('No tokens found, state set to unauthenticated');
     }
     notifyListeners();
   }
@@ -217,14 +222,14 @@ class AuthService with ChangeNotifier {
       if (expiresIn is int) {
         _tokenExpiryTime =
             DateTime.now().add(Duration(seconds: expiresIn - 60));
-        print('[AuthService] Token expiry calculated: $_tokenExpiryTime');
+        _log.fine('Token expiry calculated: $_tokenExpiryTime');
       } else {
         _tokenExpiryTime = null;
-        print('[AuthService] Invalid expires_in value: $expiresIn');
+        _log.warning('Invalid expires_in value: $expiresIn');
       }
     } else {
       _tokenExpiryTime = null;
-      print('[AuthService] No expires_in found in tokens.');
+      _log.fine('No expires_in found in tokens.');
     }
   }
 
@@ -233,20 +238,18 @@ class AuthService with ChangeNotifier {
       return true;
     }
     if (_tokenExpiryTime == null) {
-      print(
-          '[AuthService] Token expiry time unknown, assuming potentially expired.');
+      _log.warning('Token expiry time unknown, assuming potentially expired.');
       return true;
     }
     return DateTime.now().isAfter(_tokenExpiryTime!);
   }
 
   Future<bool> _refreshToken() async {
-    print('[AuthService] Attempting token refresh...');
+    _log.info('Attempting token refresh...');
     if (_hassUrl == null ||
         _tokens == null ||
         !_tokens!.containsKey('refresh_token')) {
-      print(
-          '[AuthService] Refresh failed: Missing URL, tokens, or refresh_token.');
+      _log.warning('Refresh failed: Missing URL, tokens, or refresh_token.');
       return false;
     }
 
@@ -264,33 +267,32 @@ class AuthService with ChangeNotifier {
         },
       );
 
-      print(
-          '[AuthService] Refresh token response: status=${response.statusCode}, body=${response.body}');
+      _log.fine(
+          'Refresh token response: status=${response.statusCode}, body=${response.body}');
 
       if (response.statusCode == 200) {
         _tokens = json.decode(response.body);
 
         if (!_tokens!.containsKey('refresh_token')) {
           _tokens!['refresh_token'] = refreshToken;
-          print(
-              '[AuthService] Refresh response missing refresh_token, preserving old one.');
+          _log.info(
+              'Refresh response missing refresh_token, preserving old one.');
         }
         await SecureTokenStorage.saveTokens(json.encode(_tokens));
         _updateTokenExpiryTime();
-        print('[AuthService] Token refresh successful.');
+        _log.info('Token refresh successful.');
         notifyListeners();
         return true;
       } else {
-        print(
-            '[AuthService] Refresh failed: Server returned status ${response.statusCode}');
+        _log.severe(
+            'Refresh failed: Server returned status ${response.statusCode}. Body: ${response.body}');
         await logout();
         _errorMessage = 'Authentication expired. Please log in again.';
         _state = AuthState.error;
-        notifyListeners();
         return false;
       }
-    } catch (e) {
-      print('[AuthService] Exception during token refresh: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Exception during token refresh.', e, stackTrace);
       _errorMessage = 'Network error during token refresh: $e';
       _state = AuthState.error;
       notifyListeners();
@@ -300,11 +302,10 @@ class AuthService with ChangeNotifier {
 
   Future<String?> getValidAccessToken() async {
     if (_isTokenExpired()) {
-      print(
-          '[AuthService] Access token expired or missing. Attempting refresh.');
+      _log.info('Access token expired or missing. Attempting refresh.');
       final refreshed = await _refreshToken();
       if (!refreshed) {
-        print('[AuthService] Failed to refresh token.');
+        _log.warning('Failed to refresh token.');
         return null;
       }
     }
@@ -312,8 +313,7 @@ class AuthService with ChangeNotifier {
     if (_tokens != null && _tokens!.containsKey('access_token')) {
       return _tokens!['access_token'] as String?;
     } else {
-      print(
-          '[AuthService] No access token available even after check/refresh.');
+      _log.warning('No access token available even after check/refresh.');
       return null;
     }
   }
@@ -326,8 +326,8 @@ class AuthService with ChangeNotifier {
           openFullscreen: true,
         ),
       );
-    } catch (e) {
-      print('[AuthService Linux] Error createing auth webview: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Error creating auth webview.', e, stackTrace);
       _state = AuthState.error;
       _errorMessage = 'Failed to create Linux WebView: $e';
       notifyListeners();
@@ -343,11 +343,11 @@ class AuthService with ChangeNotifier {
           _linuxAuthWebview?.setOnUrlRequestCallback(null);
           _closeLinuxAuthWebview();
         }
-      } catch (e) {
-        print('[AuthService Linux] Error during cleanup: $e');
+      } catch (e, stackTrace) {
+        _log.warning('Error during cleanup.', e, stackTrace);
       } finally {
         if (!codeHandled && _state == AuthState.authenticating) {
-          print(['AuthService Linux] Auth cancelled or failed during cleanup']);
+          _log.info('Auth cancelled or failed during cleanup');
           _state = AuthState.unauthenticated;
           _errorMessage = 'Authentication cancelled or failed.';
           notifyListeners();
@@ -364,13 +364,13 @@ class AuthService with ChangeNotifier {
             final code = uri.queryParameters['code'];
             final state = uri.queryParameters['state'];
             if (code != null && state != null) {
-              print('[AuthService Linux] Code received: $code, state: $state');
+              _log.info('Code received: $code, state: $state');
               await handleAuthCode(code, state);
             } else {
               throw Exception('Missing code or state in redirect URI.');
             }
-          } catch (e) {
-            print('[AuthService Linux] Error handling redirect: $e');
+          } catch (e, stackTrace) {
+            _log.severe('Error handling redirect.', e, stackTrace);
             _state = AuthState.error;
             _errorMessage = 'Authentication failed: ${e.toString()}';
             notifyListeners();
@@ -383,20 +383,20 @@ class AuthService with ChangeNotifier {
     });
 
     _linuxAuthWebview!.onClose.whenComplete(() {
-      print('[AuthService Linux] WebView closed.');
+      _log.fine('WebView closed.');
       if (!codeHandled && _state == AuthState.authenticating) {
-        print('[AuthService Linux] Auth cancelled by user closing window.');
+        _log.info('Auth cancelled by user closing window.');
         _state = AuthState.unauthenticated;
         _errorMessage = 'Authentication cancelled.';
         notifyListeners();
       }
       cleanup();
     });
-
     _linuxAuthWebview!.onClose.whenComplete(() {
-      print('[AuthService Linux] WebView closed.');
+      _log.fine('WebView closed (duplicate listener).');
       if (!codeHandled && _state == AuthState.authenticating) {
-        print('[AuthService Linux] Auth cancelled by user closing window.');
+        _log.info(
+            'Auth cancelled by user closing window (duplicate listener).');
         _state = AuthState.unauthenticated;
         _errorMessage = 'Authentication cancelled.';
         notifyListeners();
@@ -406,8 +406,8 @@ class AuthService with ChangeNotifier {
 
     try {
       _linuxAuthWebview!.launch(authUrl);
-    } catch (e) {
-      print('[AuthService Linux] Error launching URL in auth webview: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Error launching URL in auth webview.', e, stackTrace);
       _state = AuthState.error;
       _errorMessage = 'Could not load login page: $e';
       notifyListeners();

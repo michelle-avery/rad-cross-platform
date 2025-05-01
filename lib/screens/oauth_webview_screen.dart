@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:logging/logging.dart';
 import '../oauth_config.dart';
+
+final _log = Logger('OAuthWebViewScreen');
 
 class OAuthWebView extends StatefulWidget {
   final String authUrl;
@@ -18,7 +21,7 @@ class OAuthWebView extends StatefulWidget {
 
 class _OAuthWebViewState extends State<OAuthWebView> {
   late final WebViewController _controller;
-  bool _isHandlingCode = false; // Prevent multiple calls
+  bool _isHandlingCode = false;
 
   @override
   void initState() {
@@ -28,54 +31,44 @@ class _OAuthWebViewState extends State<OAuthWebView> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (request) {
-            print('[OAuthWebViewScreen] Navigating to: ${request.url}');
+            _log.fine('Navigating to: ${request.url}');
             final uri = Uri.parse(request.url);
-            // Use values from OAuthConfig
             if (uri.scheme == OAuthConfig.scheme &&
                 uri.host == OAuthConfig.callbackPath) {
               final code = uri.queryParameters['code'];
               final state = uri.queryParameters['state'];
-              print(
-                  '[OAuthWebViewScreen] Intercepted redirect: code=$code, state=$state');
+              _log.info('Intercepted redirect: code=$code, state=$state');
 
               if (code != null && state != null && !_isHandlingCode) {
-                _isHandlingCode = true; // Set flag
-                // Call the callback provided by AuthScreen
+                _isHandlingCode = true;
                 widget.onAuthCode(code, state);
-                // Pop the WebView screen
-                // Use Future.microtask to ensure it happens after current build/event cycle
                 Future.microtask(() {
                   if (mounted) {
                     Navigator.of(context).pop();
                   }
                 });
-                return NavigationDecision.prevent; // Stop the redirect
+                return NavigationDecision.prevent;
               }
             }
-            return NavigationDecision.navigate; // Allow other navigation
+            return NavigationDecision.navigate;
           },
           onPageFinished: (String url) {
-            print('[OAuthWebViewScreen] Page finished loading: $url');
+            _log.info('Page finished loading: $url');
           },
           onWebResourceError: (WebResourceError error) {
-            print(
-                '[OAuthWebViewScreen] Web Resource Error: ${error.description}');
-            // Optionally show an error to the user or pop the screen
+            _log.severe(
+                'Web Resource Error: ${error.description}, URL: ${error.url}, Type: ${error.errorType}',
+                error);
             if (mounted) {
-              // Avoid popping immediately if it was just the initial load failing
-              // Maybe show a snackbar or dialog
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                     content: Text('Error loading page: ${error.description}')),
               );
-              // Consider popping after a delay or if error persists?
-              // Navigator.of(context).pop();
             }
           },
         ),
       );
 
-    // Load the initial URL after controller setup
     _controller.loadRequest(Uri.parse(widget.authUrl));
   }
 

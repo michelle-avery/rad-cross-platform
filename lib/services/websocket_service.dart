@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:radcxp/services/auth_service.dart';
+import 'package:logging/logging.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
+
+final _log = Logger('WebSocketService');
 
 class _PendingCommand {
   final Completer<Map<String, dynamic>> completer;
@@ -53,12 +55,12 @@ class WebSocketService {
     String deviceId,
   ) async {
     if (_connected || _isConnecting) {
-      debugPrint(
-          'WebSocketService: Already connected or connection in progress. Skipping connect call.');
+      _log.fine(
+          'Already connected or connection in progress. Skipping connect call.');
       return;
     }
     if (_reconnectTimer != null && _reconnectTimer!.isActive) {
-      debugPrint('WebSocketService: Reconnection attempt already scheduled.');
+      _log.fine('Reconnection attempt already scheduled.');
       return;
     }
 
@@ -70,32 +72,24 @@ class WebSocketService {
     _baseUrl = baseUrl;
     _deviceId = deviceId;
     _wsUrl = baseUrl.replaceAll(RegExp(r'^http'), 'ws') + '/api/websocket';
-    debugPrint(
-        'WebSocketService: Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
+    _log.info('Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
 
     try {
       _token = await authService.getValidAccessToken();
 
       if (_token == null) {
-        debugPrint(
-            'WebSocketService: Connection failed - Unable to get a valid access token (refresh might have failed or user needs re-login).');
+        _log.warning(
+            'Connection failed - Unable to get a valid access token (refresh might have failed or user needs re-login).');
         _handleDisconnect(scheduleReconnect: false);
         return;
       }
-      debugPrint(
-          'WebSocketService: Using valid access token: ${_token!.substring(0, 10)}...');
+      _log.fine('Using valid access token: ${_token!.substring(0, 10)}...');
 
-      // TODO: Implement proper certificate validation for production.
-      // Consider making this configurable or using platform-specific trust mechanisms.
-      final httpClient = HttpClient()
-        ..badCertificateCallback =
-            (X509Certificate cert, String host, int port) => true;
-
+      final httpClient = HttpClient();
       final socket = await WebSocket.connect(_wsUrl!, customClient: httpClient);
       _channel = IOWebSocketChannel(socket);
 
-      debugPrint(
-          'WebSocketService: Connection established, waiting for messages...');
+      _log.info('Connection established, waiting for messages...');
 
       _channel!.stream.listen(
         (message) {
@@ -104,34 +98,31 @@ class WebSocketService {
             if (decodedMessage is Map<String, dynamic>) {
               _handleMessage(decodedMessage);
             } else {
-              debugPrint(
-                  'WebSocketService: Received non-JSON message: $message');
+              _log.warning('Received non-JSON message: $message');
             }
-          } catch (e) {
-            debugPrint(
-                'WebSocketService: Error decoding message: $e\nMessage: $message');
+          } catch (e, stackTrace) {
+            _log.severe('Error decoding message: $message', e, stackTrace);
           }
         },
-        onError: (error) {
-          debugPrint('WebSocketService: WebSocket error: $error');
+        onError: (error, stackTrace) {
+          _log.severe('WebSocket error.', error, stackTrace);
           _handleDisconnect();
         },
         onDone: () {
-          debugPrint(
-              'WebSocketService: WebSocket connection closed by server.');
+          _log.info('WebSocket connection closed by server.');
           _handleDisconnect();
         },
         cancelOnError: true,
       );
-    } catch (e) {
-      debugPrint('WebSocketService: Connection failed: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Connection failed.', e, stackTrace);
       _isConnecting = false;
       _handleDisconnect();
     }
   }
 
   void disconnect() {
-    debugPrint('WebSocketService: Disconnecting...');
+    _log.info('Disconnecting...');
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
     _connected = false;
@@ -149,7 +140,7 @@ class WebSocketService {
   }
 
   void dispose() {
-    debugPrint('WebSocketService: Disposing...');
+    _log.info('Disposing...');
     disconnect();
     _messageController.close();
     _navigationTargetController.close();
@@ -158,7 +149,7 @@ class WebSocketService {
 
   void _handleMessage(Map<String, dynamic> message) {
     final messageType = message['type'] as String?;
-    debugPrint('WebSocketService: Received message type: $messageType');
+    _log.fine('Received message type: $messageType');
 
     switch (messageType) {
       case 'auth_required':
@@ -168,12 +159,11 @@ class WebSocketService {
         _connected = true;
         _isConnecting = false;
         _reconnectTimer?.cancel();
-        debugPrint('WebSocketService: Authenticated successfully.');
+        _log.info('Authenticated successfully.');
         _registerAndInitialize();
         break;
       case 'auth_invalid':
-        debugPrint(
-            'WebSocketService: Authentication failed: ${message['message']}');
+        _log.warning('Authentication failed: ${message['message']}');
         _isConnecting = false;
         _handleDisconnect(scheduleReconnect: false);
         break;
@@ -190,8 +180,8 @@ class WebSocketService {
             if (resultData is Map<String, dynamic>) {
               completer.complete(resultData);
             } else {
-              debugPrint(
-                  'WebSocketService: Received successful non-map result ($resultData) for command type $originalCommandType. Completing with empty map.');
+              _log.warning(
+                  'Received successful non-map result ($resultData) for command type $originalCommandType. Completing with empty map.');
               completer.complete({});
             }
           } else {
@@ -206,7 +196,7 @@ class WebSocketService {
             );
           }
         } else {
-          debugPrint('WebSocketService: Received result for unknown id: $id');
+          _log.warning('Received result for unknown id: $id');
         }
         break;
       case 'event':
@@ -216,32 +206,31 @@ class WebSocketService {
         if (command == 'remote_assist_display/navigate_url') {
           final url = eventData?['url'] as String?;
           if (url != null && url.isNotEmpty) {
-            debugPrint('WebSocketService: Received navigate_url command: $url');
+            _log.info('Received navigate_url command: $url');
             _navigationTargetController.add(url);
           } else {
-            debugPrint(
-                'WebSocketService: Received navigate_url command with missing/empty url.');
+            _log.warning(
+                'Received navigate_url command with missing/empty url.');
           }
         } else if (command == 'remote_assist_display/navigate') {
           final path = eventData?['path'] as String?;
           if (path != null && path.isNotEmpty) {
-            debugPrint('WebSocketService: Received navigate command: $path');
+            _log.info('Received navigate command: $path');
             _navigationTargetController.add(path);
           } else {
-            debugPrint(
-                'WebSocketService: Received navigate command with missing/empty path.');
+            _log.warning('Received navigate command with missing/empty path.');
           }
         } else {
+          _log.fine('Received unhandled event command: $command');
           _messageController.add(message);
         }
         break;
       case 'pong':
         final id = message['id'] as int?;
-        debugPrint('WebSocketService: Received pong for id: $id');
+        _log.finest('Received pong for id: $id');
         break;
       default:
-        debugPrint(
-            'WebSocketService: Received unhandled message type: $messageType');
+        _log.warning('Received unhandled message type: $messageType');
         _messageController.add(message);
         break;
     }
@@ -249,15 +238,14 @@ class WebSocketService {
 
   void _authenticate() {
     if (_token != null) {
-      debugPrint('WebSocketService: Sending auth message...');
+      _log.info('Sending auth message...');
       final authMessage = jsonEncode({
         'type': 'auth',
         'access_token': _token,
       });
       _channel?.sink.add(authMessage);
     } else {
-      debugPrint(
-          'WebSocketService: Cannot authenticate - token is null. Disconnecting.');
+      _log.severe('Cannot authenticate - token is null. Disconnecting.');
       _handleDisconnect(scheduleReconnect: false);
     }
   }
@@ -266,16 +254,15 @@ class WebSocketService {
     if (!_connected && _reconnectTimer != null && _reconnectTimer!.isActive) {
       return;
     }
-    debugPrint(
-        'WebSocketService: Handling disconnect. Schedule reconnect: $scheduleReconnect');
+    _log.info('Handling disconnect. Schedule reconnect: $scheduleReconnect');
 
     _connected = false;
     _isConnecting = false;
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
 
-    _channel?.sink.close(status.normalClosure).catchError((error) {
-      debugPrint('WebSocketService: Error closing channel sink: $error');
+    _channel?.sink.close(status.normalClosure).catchError((error, stackTrace) {
+      _log.warning('Error closing channel sink.', error, stackTrace);
     });
     _channel = null;
 
@@ -290,8 +277,8 @@ class WebSocketService {
 
   void _startHeartbeat() {
     _pingTimer?.cancel();
-    debugPrint(
-        'WebSocketService: Starting heartbeat timer (${_heartbeatInterval.inSeconds}s interval).');
+    _log.info(
+        'Starting heartbeat timer (${_heartbeatInterval.inSeconds}s interval).');
     _pingTimer = Timer.periodic(_heartbeatInterval, (_) => _sendPing());
     _sendPing();
   }
@@ -299,61 +286,60 @@ class WebSocketService {
   void _sendPing() {
     if (_connected && _channel != null) {
       final pingId = _commandId++;
-      debugPrint('WebSocketService: Sending ping (id: $pingId)...');
+      _log.finest('Sending ping (id: $pingId)...');
       try {
         final pingMessage = jsonEncode({
           'id': pingId,
           'type': 'ping',
         });
         _channel!.sink.add(pingMessage);
-      } catch (e) {
-        debugPrint('WebSocketService: Error sending ping: $e');
+      } catch (e, stackTrace) {
+        _log.severe('Error sending ping.', e, stackTrace);
         _handleDisconnect();
       }
     } else {
-      debugPrint('WebSocketService: Cannot send ping - not connected.');
+      _log.warning('Cannot send ping - not connected.');
       _pingTimer?.cancel();
     }
   }
 
   Future<void> _registerAndInitialize() async {
     if (_deviceId == null) {
-      debugPrint('WebSocketService: Cannot register, deviceId is null.');
+      _log.warning('Cannot register, deviceId is null.');
       return;
     }
 
-    debugPrint('WebSocketService: Starting registration process...');
+    _log.info('Starting registration process...');
     try {
       await registerDisplay(
         deviceId: _deviceId!,
       );
-      debugPrint('WebSocketService: Registration command sent successfully.');
+      _log.info('Registration command sent successfully.');
 
       try {
-        debugPrint('WebSocketService: Fetching display settings...');
+        _log.info('Fetching display settings...');
         final settingsResult = await getDisplaySettings(deviceId: _deviceId!);
         final settings = settingsResult['settings'] as Map<String, dynamic>?;
         final defaultDashboard = settings?['default_dashboard'] as String?;
 
         if (defaultDashboard != null && defaultDashboard.isNotEmpty) {
-          debugPrint(
-              'WebSocketService: Found default dashboard: $defaultDashboard');
+          _log.info('Found default dashboard: $defaultDashboard');
           _navigationTargetController.add(defaultDashboard);
         } else {
-          debugPrint(
-              'WebSocketService: No default dashboard found in settings.');
+          _log.info('No default dashboard found in settings.');
         }
-      } catch (e) {
-        debugPrint('WebSocketService: Failed to get display settings: $e');
+      } catch (e, stackTrace) {
+        _log.severe('Failed to get display settings.', e, stackTrace);
       }
 
       await _subscribeToEventsSafe();
-      debugPrint(
-          'WebSocketService: Initialization complete, starting heartbeat.');
+      _log.info('Initialization complete, starting heartbeat.');
       _startHeartbeat();
-    } catch (e) {
-      debugPrint(
-          'WebSocketService: Error during _registerAndInitialize (registration or settings): $e');
+    } catch (e, stackTrace) {
+      _log.severe(
+          'Error during _registerAndInitialize (registration or settings).',
+          e,
+          stackTrace);
     }
   }
 
@@ -361,13 +347,13 @@ class WebSocketService {
     if (_deviceId != null) {
       try {
         await subscribeToEvents(deviceId: _deviceId!);
-      } catch (e) {
-        debugPrint(
-            'WebSocketService: Subscription failed in _subscribeToEventsSafe: $e');
+      } catch (e, stackTrace) {
+        _log.severe(
+            'Subscription failed in _subscribeToEventsSafe.', e, stackTrace);
       }
     } else {
-      debugPrint(
-          'WebSocketService: Cannot subscribe, deviceId is null in _subscribeToEventsSafe.');
+      _log.warning(
+          'Cannot subscribe, deviceId is null in _subscribeToEventsSafe.');
     }
   }
 
@@ -393,8 +379,7 @@ class WebSocketService {
         _PendingCommand(Completer<Map<String, dynamic>>(), commandType);
     _pendingCommands[commandId] = pendingCommand;
 
-    debugPrint(
-        'WebSocketService: Sending command (id: $commandId): ${commandToSend['type']}');
+    _log.fine('Sending command (id: $commandId): ${commandToSend['type']}');
 
     try {
       final message = jsonEncode(commandToSend);
@@ -407,9 +392,14 @@ class WebSocketService {
             'Command $commandId (${commandToSend['type']}) timed out after ${timeout.inSeconds} seconds.');
       });
       return result;
-    } catch (e) {
+    } catch (e, stackTrace) {
       _pendingCommands.remove(commandId);
-      debugPrint('WebSocketService: Error sending command $commandId: $e');
+      if (e is TimeoutException) {
+        _log.warning(
+            'Command $commandId (${commandToSend['type']}) timed out.');
+      } else {
+        _log.severe('Error sending command $commandId.', e, stackTrace);
+      }
       rethrow;
     }
   }
@@ -425,14 +415,14 @@ class WebSocketService {
       'display_id': deviceId,
     };
 
-    debugPrint(
-        'WebSocketService: Registering display (sending remote_assist_display/register)...');
+    _log.info(
+        'Registering display (sending remote_assist_display/register)...');
     try {
       final result = await sendCommand(command);
-      debugPrint('WebSocketService: Display registration successful: $result');
+      _log.fine('Display registration successful: $result');
       return result;
-    } catch (e) {
-      debugPrint('WebSocketService: Display registration failed: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Display registration failed.', e, stackTrace);
       rethrow;
     }
   }
@@ -445,15 +435,14 @@ class WebSocketService {
       'display_id': deviceId,
     };
 
-    debugPrint(
-        'WebSocketService: Subscribing to events (sending remote_assist_display/connect) for device $deviceId...');
+    _log.info(
+        'Subscribing to events (sending remote_assist_display/connect) for device $deviceId...');
     try {
       final result = await sendCommand(command);
-      debugPrint('WebSocketService: Event subscription successful: $result');
+      _log.fine('Event subscription successful: $result');
       return result;
-    } catch (e, s) {
-      debugPrint('WebSocketService: Event subscription failed: $e');
-      debugPrint('Stack trace: $s');
+    } catch (e, stackTrace) {
+      _log.severe('Event subscription failed.', e, stackTrace);
       rethrow;
     }
   }
@@ -465,11 +454,11 @@ class WebSocketService {
       'type': 'remote_assist_display/settings',
       'display_id': deviceId,
     };
-    debugPrint(
-        'WebSocketService: Getting display settings (sending remote_assist_display/settings)...');
+    _log.info(
+        'Getting display settings (sending remote_assist_display/settings)...');
     try {
       final result = await sendCommand(command);
-      debugPrint('WebSocketService: Get settings successful: $result');
+      _log.fine('Get settings successful: $result');
       if (result.containsKey('settings') &&
           result['settings'] is Map<String, dynamic>) {
         return result;
@@ -478,19 +467,19 @@ class WebSocketService {
             'Settings data missing or not a map in response.',
             code: 'invalid_response');
       }
-    } catch (e) {
-      debugPrint('WebSocketService: Get settings failed: $e');
+    } catch (e, stackTrace) {
+      _log.severe('Get settings failed.', e, stackTrace);
       rethrow;
     }
   }
 
   Future<void> updateCurrentUrl(String url) async {
     if (!_connected || _channel == null) {
-      debugPrint('WebSocketService: Cannot update URL - not connected.');
+      _log.warning('Cannot update URL - not connected.');
       return;
     }
     if (_deviceId == null) {
-      debugPrint('WebSocketService: Cannot update URL - deviceId is null.');
+      _log.warning('Cannot update URL - deviceId is null.');
       return;
     }
 
@@ -504,13 +493,12 @@ class WebSocketService {
       },
     };
 
-    debugPrint(
-        'WebSocketService: Sending URL update (remote_assist_display/update)... URL: $url');
+    _log.info('Sending URL update (remote_assist_display/update)... URL: $url');
     try {
       await sendCommand(command, timeout: const Duration(seconds: 5));
-      debugPrint('WebSocketService: URL update command sent successfully.');
-    } catch (e) {
-      debugPrint('WebSocketService: Failed to send URL update command: $e');
+      _log.fine('URL update command sent successfully.');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to send URL update command.', e, stackTrace);
     }
   }
 }
