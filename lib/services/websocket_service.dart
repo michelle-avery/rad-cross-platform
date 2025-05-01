@@ -34,10 +34,12 @@ class WebSocketService {
   String? _baseUrl;
   String? _deviceId;
   WebSocketChannel? _channel;
+  String _deviceStorageKey = 'browser_mod-browser-id';
   final Duration _heartbeatInterval = const Duration(seconds: 30);
   final Duration _reconnectDelay = const Duration(seconds: 5);
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+  String get deviceStorageKey => _deviceStorageKey;
   Stream<String> get navigationTargetStream =>
       _navigationTargetController.stream;
   bool get isConnected => _connected;
@@ -321,6 +323,14 @@ class WebSocketService {
         final settingsResult = await getDisplaySettings(deviceId: _deviceId!);
         final settings = settingsResult['settings'] as Map<String, dynamic>?;
         final defaultDashboard = settings?['default_dashboard'] as String?;
+        final storageKey = settings?['device_storage_key'] as String?;
+
+        if (storageKey != null && storageKey.isNotEmpty) {
+          _deviceStorageKey = storageKey;
+          _log.info('Using device storage key from server: $_deviceStorageKey');
+        } else {
+          _log.info('Using default device storage key: $_deviceStorageKey');
+        }
 
         if (defaultDashboard != null && defaultDashboard.isNotEmpty) {
           _log.info('Found default dashboard: $defaultDashboard');

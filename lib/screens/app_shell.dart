@@ -84,8 +84,11 @@ class _AppShellState extends State<AppShell> {
     }
     final tokens = authService.tokens;
     final hassUrl = authService.hassUrl;
+    final deviceId =
+        Provider.of<AppStateProvider>(context, listen: false).deviceId;
+    final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
 
-    if (tokens != null && hassUrl != null) {
+    if (tokens != null && hassUrl != null && deviceId != null) {
       final accessToken = tokens['access_token'] as String?;
       final refreshToken = tokens['refresh_token'] as String?;
       final expiresIn = tokens['expires_in'] as int?;
@@ -102,7 +105,17 @@ class _AppShellState extends State<AppShell> {
             clientId,
             hassUrl,
           );
+          final deviceIdJs = '''
+            try {
+              localStorage.setItem('$deviceStorageKey', '$deviceId');
+              localStorage.setItem('remote_assist_display_settings', {})
+              console.log('Set localStorage[$deviceStorageKey] = $deviceId');
+            } catch (e) {
+              console.error('Error setting device ID in localStorage:', e);
+            }
+          ''';
           await _linuxRadController!.evaluateJavascript(js);
+          await _linuxRadController!.evaluateJavascript(deviceIdJs);
           _linuxTokenInjected = true;
           _lastInjectedAccessToken = accessToken;
           _log.info(
@@ -118,7 +131,8 @@ class _AppShellState extends State<AppShell> {
         authService.logout();
       }
     } else {
-      _log.warning("Cannot inject token: No token or hassUrl available.");
+      _log.warning(
+          "Cannot inject token: No token, hassUrl, or deviceId available.");
       authService.logout();
     }
   }
@@ -250,9 +264,37 @@ class _AppShellState extends State<AppShell> {
               "isNavigating is false and token not injected. Attempting token injection.");
           await _injectTokenLinux(authService);
         }
+
         if (_linuxTokenInjected && _linuxRadController != null) {
           _log.fine(
-              "isNavigating is false, token injected. Getting current URL...");
+              "isNavigating is false, token injected. Injecting device ID...");
+          final deviceId =
+              Provider.of<AppStateProvider>(context, listen: false).deviceId;
+          final deviceStorageKey =
+              WebSocketService.getInstance().deviceStorageKey;
+          if (deviceId != null) {
+            final deviceIdJs = '''
+              try {
+                localStorage.setItem('$deviceStorageKey', '$deviceId');
+                console.log('Set localStorage[$deviceStorageKey] = $deviceId (on page load)');
+              } catch (e) {
+                console.error('Error setting device ID in localStorage (on page load):', e);
+              }
+            ''';
+            try {
+              await _linuxRadController!.evaluateJavascript(deviceIdJs);
+            } catch (e, s) {
+              _log.severe(
+                  "Error injecting device ID JS in isNavigatingListener: $e",
+                  e,
+                  s);
+            }
+          } else {
+            _log.warning(
+                "Cannot inject device ID in isNavigatingListener: deviceId is null.");
+          }
+
+          _log.fine("Getting current URL after device ID injection...");
           try {
             final currentUrlRaw = await _linuxRadController!
                 .evaluateJavascript('window.location.href');

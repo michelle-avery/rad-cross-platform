@@ -5,7 +5,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:logging/logging.dart';
-import 'package:radcxp/screens/log_viewer_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:radcxp/providers/app_state_provider.dart';
 import 'package:radcxp/screens/settings_screen.dart';
 import 'package:radcxp/services/websocket_service.dart';
 
@@ -139,6 +140,8 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
         widget.onPageFinished?.call(currentUrl);
         WebSocketService.getInstance().updateCurrentUrl(currentUrl);
 
+        // Inject device ID into localStorage
+        _injectDeviceIdScript(controller);
         _injectGestureDetectionScript(controller);
       },
       onProgressChanged: (controller, progress) {},
@@ -256,6 +259,35 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
     }).catchError((error) {
       _log.severe(
           'Error injecting JavaScript gesture detection script: $error');
+    });
+  }
+
+  void _injectDeviceIdScript(InAppWebViewController controller) {
+    if (!mounted) return;
+
+    final deviceId =
+        Provider.of<AppStateProvider>(context, listen: false).deviceId;
+    final deviceStorageKey = WebSocketService.getInstance().deviceStorageKey;
+
+    if (deviceId == null) {
+      _log.warning("Cannot inject device ID script: deviceId is null.");
+      return;
+    }
+
+    final String jsCode = '''
+      try {
+        localStorage.setItem('$deviceStorageKey', '$deviceId');
+        localStorage.setItem('remote_assist_display_settings', {})
+        console.log('Set localStorage[$deviceStorageKey] = $deviceId (on page load)');
+      } catch (e) {
+        console.error('Error setting device ID in localStorage (on page load):', e);
+      }
+    ''';
+
+    controller.evaluateJavascript(source: jsCode).then((result) {
+      _log.info('JavaScript device ID script injected.');
+    }).catchError((error) {
+      _log.severe('Error injecting JavaScript device ID script: $error');
     });
   }
 }
