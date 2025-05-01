@@ -40,7 +40,7 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositori
     flutter-tool \
     flutter-desktop && \
     rm -rf /var/cache/apk/*
-
+RUN apk list glib
 # Verify Flutter installation
 RUN flutter doctor -v
 
@@ -69,4 +69,6 @@ CMD mkdir -p /app/linux/flutter/ephemeral && \
     flutter build linux --release --target-platform linux-arm64 && \
     mkdir -p /app/build/linux/arm64/release/bundle/lib && \
     find /usr/lib -name 'libicu*.so.76' -exec cp {} /app/build/linux/arm64/release/bundle/lib/ \; && \
-    find /usr/lib -name libgobject-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null
+    find /usr/lib -name libgobject-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; && \
+    find /usr/lib -name libglib-2.0.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; && \
+    find /usr/lib -name libpcre2-8.so.0 -exec cp --dereference {} /app/build/linux/arm64/release/bundle/lib/ \; 2>/dev/null
