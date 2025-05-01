@@ -1,7 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../providers/app_state_provider.dart';
 import 'log_viewer_screen.dart';
 
 final _log = Logger('SettingsScreen');
@@ -100,41 +103,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: <Widget>[
-                ListTile(
-                  title: const Text('Logging Level'),
-                  subtitle:
-                      const Text('Controls the verbosity of application logs.'),
-                  trailing: DropdownButton<Level>(
-                    value: _selectedLevel,
-                    onChanged: (Level? newValue) {
-                      if (newValue != null) {
-                        _updateLogLevelPreference(newValue);
-                      }
-                    },
-                    items:
-                        _logLevels.map<DropdownMenuItem<Level>>((Level level) {
-                      return DropdownMenuItem<Level>(
-                        value: level,
-                        child: Text(level.name),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                const Divider(),
-                if (Platform.isAndroid)
-                  ListTile(
-                    title: const Text('View Logs'),
-                    leading: const Icon(Icons.description),
-                    onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) => const LogViewerScreen(),
-                      ));
-                    },
-                  ),
-              ],
+          : Consumer<AppStateProvider>(
+              builder: (context, appState, child) {
+                return ListView(
+                  padding: const EdgeInsets.all(16.0),
+                  children: <Widget>[
+                    ListTile(
+                      title: const Text('Home Assistant URL'),
+                      subtitle: Text(appState.homeAssistantUrl ?? 'Not Set'),
+                      leading: const Icon(Icons.link),
+                    ),
+                    ListTile(
+                      title: const Text('Device ID'),
+                      subtitle: Text(appState.deviceId ?? 'Not Set'),
+                      leading: const Icon(Icons.perm_device_information),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      title: const Text('Hide Header (Server Setting)'),
+                      subtitle:
+                          Text(appState.hideHeader ? 'Enabled' : 'Disabled'),
+                      leading: const Icon(Icons.view_agenda_outlined),
+                    ),
+                    ListTile(
+                      title: const Text('Hide Sidebar (Server Setting)'),
+                      subtitle:
+                          Text(appState.hideSidebar ? 'Enabled' : 'Disabled'),
+                      leading: const Icon(Icons.view_sidebar_outlined),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      title: const Text('Logging Level'),
+                      subtitle: const Text(
+                          'Controls the verbosity of application logs.'),
+                      trailing: DropdownButton<Level>(
+                        value: _selectedLevel,
+                        onChanged: (Level? newValue) {
+                          if (newValue != null) {
+                            _updateLogLevelPreference(newValue);
+                          }
+                        },
+                        items: _logLevels
+                            .map<DropdownMenuItem<Level>>((Level level) {
+                          return DropdownMenuItem<Level>(
+                            value: level,
+                            child: Text(level.name),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const Divider(),
+                    if (Platform.isAndroid)
+                      ListTile(
+                        title: const Text('View Logs'),
+                        leading: const Icon(Icons.description),
+                        onTap: () {
+                          Navigator.of(context).push(MaterialPageRoute(
+                            builder: (context) => const LogViewerScreen(),
+                          ));
+                        },
+                      ),
+                  ],
+                );
+              },
             ),
     );
   }
