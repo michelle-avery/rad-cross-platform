@@ -14,6 +14,7 @@ import '../oauth_config.dart';
 import '../webview_controller.dart';
 import '../widgets/android_webview_widget.dart';
 import 'auth_screen.dart';
+import 'settings_screen.dart';
 
 final _log = Logger('AppShell');
 
@@ -468,15 +469,7 @@ class _AppShellState extends State<AppShell> {
                 ),
               ],
             ),
-            body: const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text(
-                  'Home Assistant display is active in a separate window.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
+            body: const SettingsScreen(),
           );
         } else {
           _log.severe("Unsupported platform.");

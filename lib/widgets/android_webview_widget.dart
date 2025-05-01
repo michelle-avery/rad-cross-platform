@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:logging/logging.dart';
 import 'package:radcxp/screens/log_viewer_screen.dart';
+import 'package:radcxp/screens/settings_screen.dart';
 import 'package:radcxp/services/websocket_service.dart';
 
 final _log = Logger('AndroidWebViewWidget');
@@ -123,7 +124,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
               _log.info('JavaScript handler "threeFingerTapHandler" called!');
               if (mounted) {
                 Navigator.of(context).push(MaterialPageRoute(
-                  builder: (context) => const LogViewerScreen(),
+                  builder: (context) => const SettingsScreen(),
                 ));
               } else {
                 _log.warning(

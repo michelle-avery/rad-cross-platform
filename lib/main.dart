@@ -11,6 +11,7 @@ import 'dart:developer' as developer;
 import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'logging/in_memory_log_handler.dart';
 import 'logging/file_log_handler.dart';
 
@@ -98,10 +99,9 @@ void main(List<String> args) async {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  final isDebug = kDebugMode;
-  await _setupLogging(isDebug);
+  await _setupLogging();
 
-  Logger('main').info("Running in ${isDebug ? 'debug' : 'release'} mode.");
+  Logger('main').info("Build mode: ${kDebugMode ? 'debug' : 'release'}.");
 
   runApp(
     MultiProvider(
@@ -136,8 +136,46 @@ class MyApp extends StatelessWidget {
   }
 }
 
-Future<void> _setupLogging(bool isDebug) async {
-  Logger.root.level = isDebug ? Level.ALL : Level.INFO;
+Future<void> _setupLogging() async {
+  const Map<String, Level> logLevelsMap = {
+    'ALL': Level.ALL,
+    'FINEST': Level.FINEST,
+    'FINER': Level.FINER,
+    'FINE': Level.FINE,
+    'CONFIG': Level.CONFIG,
+    'INFO': Level.INFO,
+    'WARNING': Level.WARNING,
+    'SEVERE': Level.SEVERE,
+    'SHOUT': Level.SHOUT,
+    'OFF': Level.OFF,
+  };
+  const String logLevelPrefKey = 'logLevel';
+  Level configuredLevel = Level.INFO; // Default level
+
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final String? savedLevelName = prefs.getString(logLevelPrefKey);
+
+    if (savedLevelName != null) {
+      configuredLevel =
+          logLevelsMap[savedLevelName.toUpperCase()] ?? Level.INFO;
+      if (logLevelsMap[savedLevelName.toUpperCase()] == null) {
+        Logger('main').warning(
+            'Invalid log level "$savedLevelName" in preferences, defaulting to INFO.');
+      }
+    } else {
+      Logger('main').info('No log level preference found, defaulting to INFO.');
+    }
+  } catch (e, s) {
+    Logger('main').severe(
+        'Error reading log level preference, defaulting to INFO.', e, s);
+    configuredLevel = Level.INFO;
+  }
+
+  Logger.root.level = configuredLevel;
+  Logger('main')
+      .info('Logger initialized with level: ${Logger.root.level.name}');
+
   if (Platform.isLinux) {
     try {
       final Directory appSupportDir = await getApplicationSupportDirectory();
@@ -145,22 +183,22 @@ Future<void> _setupLogging(bool isDebug) async {
           p.join(appSupportDir.path, 'logs', 'radcxp.log');
       fileLogHandler = FileLogHandler(logFilePath);
       await fileLogHandler!.initialize();
-
-      Logger.root.onRecord.listen((record) {
-        fileLogHandler?.handleRecord(record);
-        if (isDebug) {
-          developer.log(
-            record.message,
-            time: record.time,
-            level: record.level.value,
-            name: record.loggerName,
-            error: record.error,
-            stackTrace: record.stackTrace,
-          );
-        }
-      });
       Logger('main').info(
           "Linux platform detected. File logging initialized to: $logFilePath");
+
+      void linuxLogListener(LogRecord record) {
+        fileLogHandler?.handleRecord(record);
+        developer.log(
+          record.message,
+          time: record.time,
+          level: record.level.value,
+          name: record.loggerName,
+          error: record.error,
+          stackTrace: record.stackTrace,
+        );
+      }
+
+      Logger.root.onRecord.listen(linuxLogListener);
 
       ProcessSignal.sigint.watch().listen((signal) async {
         Logger('main').info('Received SIGINT, closing log file...');
@@ -174,7 +212,9 @@ Future<void> _setupLogging(bool isDebug) async {
       });
     } catch (e, stackTrace) {
       Logger('main').severe(
-          '!!! Failed to initialize Linux file logging.', e, stackTrace);
+          '!!! Failed to initialize Linux file logging. Using fallback console logging.',
+          e,
+          stackTrace);
       Logger.root.onRecord.listen((record) {
         developer.log(
           record.message,
@@ -185,8 +225,6 @@ Future<void> _setupLogging(bool isDebug) async {
           stackTrace: record.stackTrace,
         );
       });
-      Logger('main').warning(
-          "Linux file logging failed. Using fallback console logging.");
     }
   } else if (Platform.isAndroid) {
     Logger.root.onRecord.listen((record) {
