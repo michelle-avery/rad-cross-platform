@@ -114,13 +114,13 @@ jobs:
         run: |
           chmod +x ./build_linux_arm.sh
           ./build_linux_arm.sh
-          # The script outputs the bundle to ./build/linux/arm64/release/bundle
+          # The script outputs the bundle to ./build/linux/arm64/release/release/bundle
 
       - name: Upload Linux Bundle Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-bundle
-          path: ./build/linux/arm64/release/bundle
+          path: ./build/linux/arm64/release/release/bundle
           retention-days: 7
 
   release:
