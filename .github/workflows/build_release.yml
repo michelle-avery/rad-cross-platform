@@ -76,10 +76,24 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 7
 
-      - name: Build Linux ARM64 Release (Docker)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        id: buildx # Give the buildx setup step an id to reference its outputs
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux ARM64 Release (Docker with Buildx)
         run: |
-          chmod +x ./build_linux_arm.sh
-          ./build_linux_arm.sh
+          # Use docker buildx build to build the image for linux/arm64
+          # This command replicates the core action of build_linux_arm.sh
+          # but uses buildx for cross-platform building.
+          docker buildx build \
+            --platform linux/arm64 \
+            --tag radcxp-linux-builder-alpine-arm:latest \
+            --output type=local,dest=./build/linux-arm64-release \
+            --file Dockerfile.linux-arm \
+            .
 
       - name: Package Linux ARM64 Artifacts
         id: package_linux
