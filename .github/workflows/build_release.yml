@@ -9,9 +9,11 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    name: Build Flutter App
+  build-android:
+    name: Build Android
     runs-on: ubuntu-latest
+    outputs:
+      apk_path: ${{ steps.build_apk.outputs.apk_path }}
 
     steps:
       - name: Checkout repository
@@ -65,35 +67,86 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Build Android Release APK
+        id: build_apk
         if: steps.check_secrets.outputs.secrets_present == 'true'
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+          # Set output path
+          echo "apk_path=build/app/outputs/flutter-apk/app-release.apk" >> $GITHUB_OUTPUT
 
       - name: Upload Android APK Artifact
         if: steps.check_secrets.outputs.secrets_present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: radcxp-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ steps.build_apk.outputs.apk_path }}
           retention-days: 7
+
+  build-linux:
+    name: Build Linux (Alpine/musl ARM64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate App Icons
+        run: flutter pub run flutter_launcher_icons
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        id: buildx # Give the buildx setup step an id to reference its outputs
+        id: buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build Linux ARM64 Release (Docker with Buildx)
         run: |
-          # Use docker buildx build to build the image for linux/arm64
-          # This command replicates the core action of build_linux_arm.sh
-          # but uses buildx for cross-platform building.
           docker buildx build \
             --platform linux/arm64 \
             --tag radcxp-linux-builder-alpine-arm:latest \
-            --output type=local,dest=./build/linux-arm64-release \
+            --output type=local,dest=./linux-build-output \
             --file Dockerfile.linux-arm \
             .
+
+      - name: Upload Linux Build Output Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build-output
+          path: ./linux-build-output
+          retention-days: 7
+
+  release:
+    name: Package and Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-android, build-linux]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Android APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: radcxp-android-apk
+          path: ./apk-artifact
+
+      - name: Download Linux Build Output Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build-output
+          path: ./linux-build-output
 
       - name: Package Linux ARM64 Artifacts
         id: package_linux
@@ -104,20 +157,12 @@ jobs:
           # Define archive name with version and target specifics
           ARCHIVE_NAME="radcxp-linux-arm64-alpine-musl-v${APP_VERSION}.tar.gz"
           echo "Archive Name: $ARCHIVE_NAME"
-          # Create the tarball
-          tar -czvf ${ARCHIVE_NAME} -C build/linux-arm64-release .
+          # Create the tarball from the downloaded directory
+          tar -czvf ${ARCHIVE_NAME} -C ./linux-build-output .
           # Set output variable for the archive name
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Upload Linux ARM64 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: radcxp-linux-arm64-alpine-musl-tarball # Update artifact name here too
-          path: ${{ steps.package_linux.outputs.archive_name }}
-          retention-days: 7
-
       - name: Validate Version Tag
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           # Extract version from pubspec.yaml (e.g., 1.0.0+1 -> 1.0.0)
           PUB_VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | sed 's/+.*//')
@@ -134,18 +179,14 @@ jobs:
           echo "Version tag matches pubspec.yaml."
 
       - name: Create GitHub Release and Upload Artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          # Optional: Add release notes or mark as pre-release
-          # body: |
-          #   Release notes for ${{ github.ref_name }}
-          # prerelease: false
-          draft: false # Create as a published release
+          draft: false
+          prerelease: false
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
+            ./apk-artifact/app-release.apk
             ${{ steps.package_linux.outputs.archive_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
