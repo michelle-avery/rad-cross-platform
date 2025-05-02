@@ -1,5 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:intl/intl.dart';
+
 import '../main.dart';
 import '../logging/in_memory_log_handler.dart';
 
@@ -35,6 +40,51 @@ class _LogViewerScreenState extends State<LogViewerScreen> {
     });
   }
 
+  Future<void> _shareLogs() async {
+    final records = inMemoryLogHandler.records;
+    if (records.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No logs to share.')),
+      );
+      return;
+    }
+
+    try {
+      final logBuffer = StringBuffer();
+      for (final record in records) {
+        logBuffer.writeln(InMemoryLogHandler.formatRecord(record));
+      }
+      final logContent = logBuffer.toString();
+
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'rad_logs_$timestamp.log';
+      final logFile = File('${tempDir.path}/$fileName');
+
+      await logFile.writeAsString(logContent);
+
+      final result = await Share.shareXFiles(
+        [XFile(logFile.path)],
+        text: 'RAD Application Logs',
+      );
+
+      if (result.status == ShareResultStatus.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logs shared successfully.')),
+        );
+      } else if (result.status == ShareResultStatus.dismissed) {
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share logs: ${result.status}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error preparing logs for sharing: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final records = inMemoryLogHandler.records;
@@ -52,6 +102,11 @@ class _LogViewerScreenState extends State<LogViewerScreen> {
             icon: const Icon(Icons.arrow_downward),
             tooltip: 'Scroll to Bottom',
             onPressed: _scrollToBottom,
+          ),
+          IconButton(
+            icon: const Icon(Icons.share),
+            tooltip: 'Share Logs',
+            onPressed: _shareLogs,
           ),
         ],
       ),
