@@ -337,9 +337,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       });
 
     _linuxInitialLoadAttempted = true;
-    _log.info("Launching Linux WebView with URL: $url");
+    final initialUrlWithCallback = Uri.parse(url).replace(
+      queryParameters: {'auth_callback': '1'},
+    ).toString();
+    _log.info("Launching Linux WebView with URL: $initialUrlWithCallback");
     try {
-      _linuxWebview!.launch(url);
+      _linuxWebview!.launch(initialUrlWithCallback);
     } catch (e, s) {
       _log.severe("Error launching URL in Linux WebView: $e", e, s);
       _closeLinuxWebview();
@@ -440,9 +443,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           final refreshToken = tokens?['refresh_token'] as String?;
           final expiresIn = tokens?['expires_in'] as int?;
 
+          final initialUrlWithCallback = Uri.parse(homeAssistantUrl).replace(
+            queryParameters: {'auth_callback': '1'},
+          ).toString();
+          _log.info(
+              "Initial Android URL with auth_callback: $initialUrlWithCallback");
+
           return AndroidWebViewWidget(
             key: ValueKey(homeAssistantUrl),
-            initialUrl: homeAssistantUrl,
+            initialUrl: initialUrlWithCallback,
             onPageFinished: (url) {
               _log.info("AndroidWebViewWidget finished loading: $url");
               if (!_isWebViewReady) {

@@ -7,8 +7,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
 
+import '../oauth_config.dart';
 import '../providers/app_state_provider.dart';
 import '../screens/settings_screen.dart';
+import '../services/auth_service.dart';
 import '../services/websocket_service.dart';
 import '../webview_controller.dart';
 
@@ -106,10 +108,13 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
       onLoadStop: (controller, url) async {
         final currentUrl = url?.toString() ?? '';
         _log.info('Android WebView finished loading: $currentUrl');
+
+        await _injectAuthTokensWithHelper(controller);
+
         widget.onPageFinished?.call(currentUrl);
         WebSocketService.getInstance().updateCurrentUrl(currentUrl);
 
-        _injectDisplaySettingsWithHelper(controller); // Updated call
+        _injectDisplaySettingsWithHelper(controller);
         _injectGestureDetectionScript(controller);
       },
       onProgressChanged: (controller, progress) {},
@@ -154,6 +159,47 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
       _log.severe(
           'Error injecting JavaScript display settings script via helper: $error');
     });
+  }
+
+  Future<void> _injectAuthTokensWithHelper(
+      InAppWebViewController controller) async {
+    if (!mounted) return;
+    _log.info('Attempting to inject auth tokens via helper...');
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final tokens = authService.tokens;
+    final hassUrl = authService.hassUrl;
+
+    if (tokens != null && hassUrl != null) {
+      final accessToken = tokens['access_token'] as String?;
+      final refreshToken = tokens['refresh_token'] as String?;
+      final expiresIn = tokens['expires_in'] as int?;
+      final clientId = OAuthConfig.buildClientId(hassUrl);
+
+      if (accessToken != null && refreshToken != null && expiresIn != null) {
+        final String authJs = RadWebViewController.generateAuthInjectionJs(
+          accessToken,
+          refreshToken,
+          expiresIn,
+          clientId,
+          hassUrl,
+        );
+
+        try {
+          await controller.evaluateJavascript(source: authJs);
+          _log.info('JavaScript auth tokens injected via helper.');
+        } catch (error) {
+          _log.severe(
+              'Error injecting JavaScript auth tokens via helper: $error');
+        }
+      } else {
+        _log.warning(
+            "Cannot inject auth tokens: Missing token details (access, refresh, or expiry).");
+      }
+    } else {
+      _log.warning(
+          "Cannot inject auth tokens: No tokens or hassUrl available from AuthService.");
+    }
   }
 
   void _injectGestureDetectionScript(InAppWebViewController controller) {
