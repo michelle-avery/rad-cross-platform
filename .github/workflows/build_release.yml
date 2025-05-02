@@ -101,8 +101,8 @@ jobs:
           # Extract version from pubspec.yaml (e.g., 1.0.0+1 -> 1.0.0)
           APP_VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //g' | sed 's/+.*//')
           echo "App Version: $APP_VERSION"
-          # Define archive name with version
-          ARCHIVE_NAME="radcxp-linux-arm64-v${APP_VERSION}.tar.gz"
+          # Define archive name with version and target specifics
+          ARCHIVE_NAME="radcxp-linux-arm64-alpine-musl-v${APP_VERSION}.tar.gz"
           echo "Archive Name: $ARCHIVE_NAME"
           # Create the tarball
           tar -czvf ${ARCHIVE_NAME} -C build/linux-arm64-release .
@@ -112,7 +112,7 @@ jobs:
       - name: Upload Linux ARM64 Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: radcxp-linux-arm64-tarball
+          name: radcxp-linux-arm64-alpine-musl-tarball # Update artifact name here too
           path: ${{ steps.package_linux.outputs.archive_name }}
           retention-days: 7
 
