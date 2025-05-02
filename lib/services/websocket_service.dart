@@ -441,11 +441,6 @@ class WebSocketService {
     }
   }
 
-  Future<String> _getDeviceHostname() async {
-    // TODO: Implement actual hostname retrieval using device_info_plus or similar
-    return 'Unknown Device';
-  }
-
   Future<Map<String, dynamic>> sendCommand(
     Map<String, dynamic> command, {
     Duration timeout = const Duration(seconds: 10),
@@ -491,7 +486,7 @@ class WebSocketService {
   Future<Map<String, dynamic>> registerDisplay({
     required String deviceId,
   }) async {
-    final hostname = await _getDeviceHostname();
+    final hostname = _appStateProvider?.hostName ?? 'Unknown Device';
 
     final Map<String, dynamic> command = {
       'type': 'remote_assist_display/register',

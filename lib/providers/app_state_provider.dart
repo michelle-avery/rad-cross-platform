@@ -28,6 +28,7 @@ class AppStateProvider extends ChangeNotifier {
   bool get isConfigured => _isConfigured;
   String? get homeAssistantUrl => _homeAssistantUrl;
   String? get deviceId => _deviceId;
+  String? get hostName => _hostName;
   bool get hideHeader => _hideHeader ?? false;
   bool get hideSidebar => _hideSidebar ?? false;
 
