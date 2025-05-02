@@ -1,3 +1,7 @@
+import java.util.Properties
+import java.io.FileInputStream
+import org.gradle.api.GradleException // Also import GradleException
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -10,9 +14,9 @@ val keyPropertiesFile = rootProject.file("key.properties") // Look for key.prope
 val keyProperties = java.util.Properties()
 if (keyPropertiesFile.exists()) {
     try {
-        keyProperties.load(java.io.FileInputStream(keyPropertiesFile))
+        keyProperties.load(FileInputStream(keyPropertiesFile)) // Use imported FileInputStream
     } catch (e: java.io.IOException) {
-        throw GradleException("Could not read key.properties file", e)
+        throw GradleException("Could not read key.properties file", e) // Use imported GradleException
     }
 }
 
