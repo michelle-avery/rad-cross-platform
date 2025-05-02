@@ -23,7 +23,7 @@ if (keyPropertiesFile.exists()) {
 android {
     namespace = "com.caffeinatedfirefly.radcxp"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "27.0.12077973" // Explicitly set NDK version required by plugins
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
