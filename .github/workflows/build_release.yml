@@ -110,20 +110,17 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Linux ARM64 Release (Docker with Buildx)
+      - name: Build Linux ARM64 Release using Script
         run: |
-          docker buildx build \
-            --platform linux/arm64 \
-            --tag radcxp-linux-builder-alpine-arm:latest \
-            --output type=local,dest=./linux-build-output \
-            --file Dockerfile.linux-arm \
-            .
+          chmod +x ./build_linux_arm.sh
+          ./build_linux_arm.sh
+          # The script outputs the bundle to ./build/linux/arm64/release/bundle
 
-      - name: Upload Linux Build Output Artifact
+      - name: Upload Linux Bundle Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-build-output
-          path: ./linux-build-output
+          name: linux-bundle
+          path: ./build/linux/arm64/release/bundle
           retention-days: 7
 
   release:
@@ -144,11 +141,11 @@ jobs:
           name: radcxp-android-apk
           path: ./apk-artifact
 
-      - name: Download Linux Build Output Artifact
+      - name: Download Linux Bundle Artifact
         uses: actions/download-artifact@v4
         with:
-          name: linux-build-output
-          path: ./linux-build-output
+          name: linux-bundle
+          path: ./linux-bundle
 
       - name: Package Linux ARM64 Artifacts
         id: package_linux
@@ -159,8 +156,16 @@ jobs:
           # Define archive name with version and target specifics
           ARCHIVE_NAME="radcxp-linux-arm64-alpine-musl-v${APP_VERSION}.tar.gz"
           echo "Archive Name: $ARCHIVE_NAME"
-          # Create the tarball from the downloaded directory
-          tar -czvf ${ARCHIVE_NAME} -C ./linux-build-output .
+          # The downloaded artifact IS the bundle content
+          BUNDLE_DOWNLOAD_PATH="./linux-bundle"
+          echo "Bundle Download Path: $BUNDLE_DOWNLOAD_PATH"
+          # Check if download path exists
+          if [ ! -d "$BUNDLE_DOWNLOAD_PATH" ]; then
+            echo "::error::Expected bundle directory not found at $BUNDLE_DOWNLOAD_PATH after download."
+            exit 1
+          fi
+          # Create the tarball directly from the downloaded bundle directory contents
+          tar -czvf ${ARCHIVE_NAME} -C ${BUNDLE_DOWNLOAD_PATH} .
           # Set output variable for the archive name
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
 
@@ -190,5 +195,4 @@ jobs:
           files: |
             ./apk-artifact/app-release.apk
             ${{ steps.package_linux.outputs.archive_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
