@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:logging/logging.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../providers/app_state_provider.dart';
 import '../services/auth_service.dart';
@@ -25,7 +26,8 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  // Add WidgetsBindingObserver mixin
   Webview? _linuxWebview;
   LinuxWebViewController? _linuxRadController;
   bool _linuxInitialLoadAttempted = false;
@@ -39,13 +41,64 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<AuthService>(context, listen: false).loadTokens();
+      if (Platform.isAndroid &&
+          Provider.of<AuthService>(context, listen: false).state ==
+              AuthState.authenticated) {
+        _log.info("Enabling wakelock on initial load (Android).");
+        WakelockPlus.enable();
+      }
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (!Platform.isAndroid) return;
+
+    try {
+      final isAuthenticated =
+          Provider.of<AuthService>(context, listen: false).state ==
+              AuthState.authenticated;
+
+      if (isAuthenticated) {
+        switch (state) {
+          case AppLifecycleState.resumed:
+            _log.info("App resumed, enabling wakelock (Android).");
+            WakelockPlus.enable();
+            break;
+          case AppLifecycleState.inactive:
+          case AppLifecycleState.paused:
+          case AppLifecycleState.detached:
+          case AppLifecycleState.hidden:
+            _log.info(
+                "App inactive/paused/detached/hidden, disabling wakelock (Android).");
+            WakelockPlus.disable();
+            break;
+        }
+      } else {
+        _log.info(
+            "App lifecycle changed but not authenticated, ensuring wakelock is disabled (Android).");
+        WakelockPlus.disable();
+      }
+    } catch (e, s) {
+      _log.warning(
+          "Error accessing provider during lifecycle change, ensuring wakelock is disabled: $e",
+          e,
+          s);
+      WakelockPlus.disable();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (Platform.isAndroid) {
+      _log.info("Disposing widget, disabling wakelock (Android).");
+      WakelockPlus.disable();
+    }
     _closeLinuxWebview();
     super.dispose();
   }
