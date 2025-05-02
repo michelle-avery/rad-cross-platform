@@ -11,7 +11,7 @@ plugins {
 
 // Read properties from key.properties file if it exists
 val keyPropertiesFile = rootProject.file("key.properties") // Look for key.properties in android/ directory
-val keyProperties = java.util.Properties()
+val keyProperties = Properties() // Use imported Properties
 if (keyPropertiesFile.exists()) {
     try {
         keyProperties.load(FileInputStream(keyPropertiesFile)) // Use imported FileInputStream
