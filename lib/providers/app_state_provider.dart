@@ -39,7 +39,6 @@ class AppStateProvider extends ChangeNotifier {
 
   Future<void> _initialize() async {
     await _loadSavedState();
-    await _loadOrGenerateDeviceId();
     _authService.addListener(_handleAuthStateChanged);
     _handleAuthStateChanged();
   }
@@ -58,17 +57,27 @@ class AppStateProvider extends ChangeNotifier {
     _homeAssistantUrl = prefs.getString(_haUrlKey);
     _hideHeader = prefs.getBool(_hideHeaderKey);
     _hideSidebar = prefs.getBool(_hideSidebarKey);
+    _deviceId = prefs.getString(_deviceIdKey);
     _log.info(
-        'Loaded $_haUrlKey: $_homeAssistantUrl, $_hideHeaderKey: $_hideHeader, $_hideSidebarKey: $_hideSidebar');
+        'Loaded $_haUrlKey: $_homeAssistantUrl, $_deviceIdKey: $_deviceId, $_hideHeaderKey: $_hideHeader, $_hideSidebarKey: $_hideSidebar');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
-    _log.info('isConfigured: $_isConfigured');
+    _log.info('isConfigured (based on URL): $_isConfigured');
   }
 
-  Future<void> _loadOrGenerateDeviceId() async {
-    final prefs = await SharedPreferences.getInstance();
-    _deviceId = prefs.getString(_deviceIdKey);
+  Future<void> configureInitialDeviceId(String? customDeviceId) async {
+    if (_deviceId != null && _deviceId!.isNotEmpty) {
+      _log.warning(
+          'configureInitialDeviceId called, but device ID already exists: $_deviceId');
+      return;
+    }
 
-    if (_deviceId == null) {
+    final prefs = await SharedPreferences.getInstance();
+    String? finalDeviceId;
+
+    if (customDeviceId != null && customDeviceId.isNotEmpty) {
+      finalDeviceId = customDeviceId;
+      _log.info('Using provided custom device ID: $finalDeviceId');
+    } else {
       final deviceInfo = DeviceInfoPlugin();
       if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
@@ -81,27 +90,23 @@ class AppStateProvider extends ChangeNotifier {
         _hostName = "Unknown";
       }
       final randomID = const Uuid().v4().substring(0, 12);
-      _deviceId = 'rad-$randomID-$_hostName';
-      await prefs.setString(_deviceIdKey, _deviceId!);
-      _log.info('Generated and saved new device ID: $_deviceId');
-    } else {
-      _log.info('Retrieved existing device ID: $_deviceId');
+      finalDeviceId = 'rad-$randomID-$_hostName';
+      _log.info('Generated new device ID: $finalDeviceId');
     }
+
+    _deviceId = finalDeviceId;
+    await prefs.setString(_deviceIdKey, _deviceId!);
+    _log.info('Saved device ID: $_deviceId');
     notifyListeners();
   }
 
-  /// Allows overriding the device ID (e.g., for migration).
-  Future<void> setDeviceId(String newDeviceId) async {
-    if (newDeviceId.isNotEmpty && _deviceId != newDeviceId) {
-      final prefs = await SharedPreferences.getInstance();
-      _deviceId = newDeviceId;
-      await prefs.setString(_deviceIdKey, _deviceId!);
-      _log.info('Set device ID override: $_deviceId');
-      notifyListeners();
-    }
-  }
-
   Future<void> setHomeAssistantUrl(String url) async {
+    if (_deviceId == null || _deviceId!.isEmpty) {
+      _log.severe(
+          'Attempted to set Home Assistant URL before device ID was configured!');
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     _homeAssistantUrl = url;
     _isConfigured = true;

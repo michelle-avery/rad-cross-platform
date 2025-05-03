@@ -29,6 +29,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _urlController = TextEditingController();
+  final _customDeviceIdController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -50,6 +51,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _urlController.dispose();
+    _customDeviceIdController.dispose();
     super.dispose();
   }
 
@@ -72,6 +74,18 @@ class _AuthScreenState extends State<AuthScreen> {
     final appState = Provider.of<AppStateProvider>(context, listen: false);
 
     try {
+      if (appState.deviceId == null || appState.deviceId!.isEmpty) {
+        _log.info(
+            'Device ID not set, configuring initial ID. Custom input: "${_customDeviceIdController.text}"');
+        await appState.configureInitialDeviceId(
+            _customDeviceIdController.text.trim().isEmpty
+                ? null
+                : _customDeviceIdController.text.trim());
+      } else {
+        _log.info(
+            'Device ID already set (${appState.deviceId}), skipping initial configuration.');
+      }
+
       final validatedUrl =
           await authService.validateAndSetUrl(_urlController.text);
       await appState.setHomeAssistantUrl(validatedUrl);
@@ -135,8 +149,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final appState = Provider.of<AppStateProvider>(context);
     final authService = Provider.of<AuthService>(context);
     final authState = authService.state;
+    final bool showMigrationOption =
+        appState.deviceId == null || appState.deviceId!.isEmpty;
+
     if (authState == AuthState.error && _isLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -256,6 +274,60 @@ class _AuthScreenState extends State<AuthScreen> {
                               autocorrect: false,
                               enableSuggestions: false,
                             ),
+                            if (showMigrationOption) ...[
+                              const SizedBox(height: 16),
+                              ExpansionTile(
+                                title: const Text(
+                                  'Advanced: Migration Settings',
+                                  style:
+                                      TextStyle(fontSize: 14, color: textColor),
+                                ),
+                                tilePadding: EdgeInsets.zero,
+                                childrenPadding:
+                                    const EdgeInsets.only(top: 8.0),
+                                children: [
+                                  Text(
+                                    'If migrating from an older version of RAD, enter your previous Device ID here to keep the same entity in Home Assistant. Otherwise, leave this blank.',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: textColor.withOpacity(0.7)),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextFormField(
+                                    controller: _customDeviceIdController,
+                                    decoration: InputDecoration(
+                                      hintText: 'Optional: Previous Device ID',
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 12.0, vertical: 12.0),
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(6.0),
+                                        borderSide: const BorderSide(
+                                            color: inputBorderColor,
+                                            width: 1.0),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(6.0),
+                                        borderSide: const BorderSide(
+                                            color: inputBorderColor,
+                                            width: 1.0),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(6.0),
+                                        borderSide: const BorderSide(
+                                            color: primaryColor, width: 1.0),
+                                      ),
+                                      isDense: true,
+                                    ),
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 8),
                             Visibility(
                               visible: _errorMessage != null,
