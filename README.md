@@ -64,7 +64,7 @@ Ensure you have the necessary runtime libraries installed on your system. Packag
     ```
 4.  Run the installation script:
     ```bash
-    ./install.sh
+    sh install.sh
     ```
     This script will:
     - Make the `radcxp` binary executable.
