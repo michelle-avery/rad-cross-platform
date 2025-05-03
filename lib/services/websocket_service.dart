@@ -12,6 +12,9 @@ import '../providers/app_state_provider.dart';
 
 final _log = Logger('WebSocketService');
 
+const int _maxRegistrationRetries = 5;
+const Duration _registrationRetryDelay = Duration(seconds: 5);
+
 class _PendingCommand {
   final Completer<Map<String, dynamic>> completer;
   final String commandType;
@@ -398,18 +401,56 @@ class WebSocketService {
     }
   }
 
+  Future<void> _attemptRegistrationWithRetry() async {
+    if (_deviceId == null) {
+      _log.warning('Cannot register, deviceId is null.');
+      throw WebSocketException('Device ID is null, cannot register.');
+    }
+
+    for (int attempt = 1; attempt <= _maxRegistrationRetries; attempt++) {
+      try {
+        _log.info(
+            'Attempting registration (Attempt $attempt/$_maxRegistrationRetries)...');
+        await registerDisplay(deviceId: _deviceId!);
+        _log.info('Registration successful on attempt $attempt.');
+        return;
+      } on WebSocketException catch (e, stackTrace) {
+        if (e.code == 'unknown_command') {
+          _log.warning(
+              'Registration failed with unknown_command (Attempt $attempt/$_maxRegistrationRetries). Retrying in ${_registrationRetryDelay.inSeconds}s...',
+              e,
+              stackTrace);
+          if (attempt == _maxRegistrationRetries) {
+            _log.severe('Max registration retries reached. Giving up.');
+            rethrow;
+          }
+          await Future.delayed(_registrationRetryDelay);
+        } else {
+          _log.severe(
+              'Registration failed with non-retryable error (Attempt $attempt).',
+              e,
+              stackTrace);
+          rethrow;
+        }
+      } catch (e, stackTrace) {
+        _log.severe(
+            'Registration failed with unexpected error (Attempt $attempt).',
+            e,
+            stackTrace);
+        rethrow;
+      }
+    }
+  }
+
   Future<void> _registerAndInitialize() async {
     if (_deviceId == null) {
       _log.warning('Cannot register, deviceId is null.');
       return;
     }
 
-    _log.info('Starting registration process...');
+    _log.info('Starting registration and initialization process...');
     try {
-      await registerDisplay(
-        deviceId: _deviceId!,
-      );
-      _log.info('Registration command sent successfully.');
+      await _attemptRegistrationWithRetry();
 
       try {
         _log.info('Fetching display settings...');
@@ -440,9 +481,10 @@ class WebSocketService {
       _startHeartbeat();
     } catch (e, stackTrace) {
       _log.severe(
-          'Error during _registerAndInitialize (registration or settings).',
+          'Error during _registerAndInitialize (registration failed permanently or settings fetch failed).',
           e,
           stackTrace);
+      _handleDisconnect(scheduleReconnect: false);
     }
   }
 
