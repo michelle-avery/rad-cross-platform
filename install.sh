@@ -94,14 +94,14 @@ echo "--- Installation Complete ---"
 echo "You can now run the application manually by executing:"
 echo "  ${WRAPPER_SCRIPT_PATH}"
 echo ""
-$(if [ "$IS_PMOS" = true ]; then
+if [ "$IS_PMOS" = true ]; then
   echo "NOTE for postmarketOS users running via SSH:"
   echo "  If the application doesn't appear on the device display when run manually,"
   echo "  you might need to set the XDG runtime directory before running the script:"
   echo "  export XDG_RUNTIME_DIR=\"/run/user/10000\" # (Adjust user ID if needed)"
   echo "  Then run: ${WRAPPER_SCRIPT_PATH}"
   echo ""
-fi)
+fi
 echo "If you enabled autostart, it should launch the next time you log in."
 echo "To uninstall, simply delete the application directory ('${SCRIPT_DIR}')"
 echo "and remove the desktop entry file if you created it:"
