@@ -72,6 +72,7 @@ abstract class RadWebViewController {
       } catch (e) {
         console.error('Error setting device ID or display settings in localStorage:', e);
       }
+      null;
     ''';
   }
 
