@@ -76,10 +76,16 @@ Ensure you have the necessary runtime libraries installed on your system. Packag
 1.  **First Run:**
     *   Launch the application (either via the `start-radcxp` script, or rebooting if autostart was enabled.
     *   You will be prompted to enter the URL of your Home Assistant instance (e.g., `https://homeassistant.your-domain.org`).
+    * If you're upgrading from the original Python/Kivy version of RAD, you can optionally expand the "Advanced: Migration Settings" section and manually set the unique ID of the device to match the one used in the previous version. This will allow you to retain your existing settings and configurations:
+    ![Screenshot showing the unique ID field under Advanced Migration Settings](images/migration_unique_id.png)
     *   The application will initiate the OAuth2 login flow with your Home Assistant instance. Log in and authorize the "Remote Assist Display" application.
 2.  **Normal Operation:**
     *   The application will connect to Home Assistant and display your default dashboard in fullscreen mode.
     *   It will listen for commands from the `remote_assist_display` integration in Home Assistant.
+3. **Adjusting Settings:**
+    * On Linux, the main app window (usually in the background once the dashboard is displayed) contains the settings.
+    * On Android, you can access the settings screen by tapping on the display with three fingers.
+    * The settings page displays some diagnostic information and also allows you to change the log level.
 
 **Note for postmarketOS Users (Manual Start via SSH):**
 
