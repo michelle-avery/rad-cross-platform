@@ -156,17 +156,19 @@ jobs:
           # Define archive name with version and target specifics
           ARCHIVE_NAME="radcxp-linux-arm64-alpine-musl-v${APP_VERSION}.tar.gz"
           echo "Archive Name: $ARCHIVE_NAME"
-          # The downloaded artifact IS the bundle content
           BUNDLE_DOWNLOAD_PATH="./linux-bundle"
+          STAGING_DIR="./staging"
+          TOP_LEVEL_DIR="remote_assist_display_cxp"
           echo "Bundle Download Path: $BUNDLE_DOWNLOAD_PATH"
-          # Check if download path exists
+          echo "Staging Directory: $STAGING_DIR"
+          echo "Top Level Directory: $TOP_LEVEL_DIR"
           if [ ! -d "$BUNDLE_DOWNLOAD_PATH" ]; then
             echo "::error::Expected bundle directory not found at $BUNDLE_DOWNLOAD_PATH after download."
             exit 1
           fi
-          # Create the tarball directly from the downloaded bundle directory contents
-          tar -czvf ${ARCHIVE_NAME} -C ${BUNDLE_DOWNLOAD_PATH} .
-          # Set output variable for the archive name
+          mkdir -p "${STAGING_DIR}/${TOP_LEVEL_DIR}"
+          cp -a "${BUNDLE_DOWNLOAD_PATH}/." "${STAGING_DIR}/${TOP_LEVEL_DIR}/"
+          tar -czvf ${ARCHIVE_NAME} -C ${STAGING_DIR} ${TOP_LEVEL_DIR}
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
 
       - name: Validate Version Tag
@@ -195,4 +197,3 @@ jobs:
           files: |
             ./apk-artifact/app-release.apk
             ${{ steps.package_linux.outputs.archive_name }}
-
