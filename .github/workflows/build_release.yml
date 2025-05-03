@@ -168,6 +168,8 @@ jobs:
           fi
           mkdir -p "${STAGING_DIR}/${TOP_LEVEL_DIR}"
           cp -a "${BUNDLE_DOWNLOAD_PATH}/." "${STAGING_DIR}/${TOP_LEVEL_DIR}/"
+          echo "Copying install.sh to staging area..."
+          cp install.sh "${STAGING_DIR}/${TOP_LEVEL_DIR}/"
           tar -czvf ${ARCHIVE_NAME} -C ${STAGING_DIR} ${TOP_LEVEL_DIR}
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
 
