@@ -5,6 +5,10 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include <unistd.h>
+#include <libgen.h>
+#include <linux/limits.h>
+
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
@@ -51,6 +55,20 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_show(GTK_WIDGET(window));
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
+
+  char exe_path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+  if (len != -1) {
+      exe_path[len] = '\0'; // Null-terminate
+      g_autofree gchar* exe_dir = g_path_get_dirname(exe_path);
+      g_autofree gchar* data_dir = g_build_filename(exe_dir, "data", nullptr);
+      g_autofree gchar* icu_data_path = g_build_filename(data_dir, "icudtl.dat", nullptr);
+      fl_dart_project_set_icu_data_path(project, icu_data_path);
+      g_info("ICU data path set to: %s", icu_data_path);
+  } else {
+      g_critical("Failed to determine executable path from /proc/self/exe. ICU loading may fail.");
+  }
+
   fl_dart_project_set_dart_entrypoint_arguments(project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
