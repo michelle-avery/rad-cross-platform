@@ -45,10 +45,3 @@ echo "--- Cleanup complete ---"
 
 echo "--- Linux ARM build process finished successfully ---"
 echo
-echo "IMPORTANT NOTE FOR DEPLOYING TO TARGET SYSTEM:"
-echo "After copying the bundle directory to your target system,"
-echo "you must create the /usr/lib/flutter directory and copy"
-echo "the icudtl.dat file there:"
-echo "  mkdir -p /usr/lib/flutter"
-echo "  cp bundle/data/icudtl.dat /usr/lib/flutter/"
-echo
