@@ -88,11 +88,20 @@ class WebSocketService {
     _log.info('Attempting to connect to $_wsUrl... (Device ID: $_deviceId)');
 
     try {
-      _token = await _authService!.getValidAccessToken();
+      try {
+        _token = await _authService!.getValidAccessToken();
+      } on TemporaryAuthRefreshException catch (e) {
+        _log.warning(
+            'Connection attempt failed due to temporary token refresh issue: $e. Scheduling reconnect.');
+        _isConnecting = false;
+        _handleDisconnect(scheduleReconnect: true);
+        return;
+      }
 
       if (_token == null) {
         _log.warning(
-            'Connection failed - Unable to get a valid access token (refresh might have failed or user needs re-login).');
+            'Connection failed - Unable to get a valid access token (permanent refresh failure or unexpected issue).');
+        _isConnecting = false;
         _handleDisconnect(scheduleReconnect: false);
         return;
       }

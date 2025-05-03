@@ -21,6 +21,21 @@ import '../oauth_config.dart';
 
 final _log = Logger('AuthService');
 
+// Custom Exceptions for Refresh Failures
+class TemporaryAuthRefreshException implements Exception {
+  final String message;
+  TemporaryAuthRefreshException(this.message);
+  @override
+  String toString() => 'TemporaryAuthRefreshException: $message';
+}
+
+class PermanentAuthRefreshException implements Exception {
+  final String message;
+  PermanentAuthRefreshException(this.message);
+  @override
+  String toString() => 'PermanentAuthRefreshException: $message';
+}
+
 enum AuthState {
   unauthenticated,
   authenticating,
@@ -244,13 +259,19 @@ class AuthService with ChangeNotifier {
     return DateTime.now().isAfter(_tokenExpiryTime!);
   }
 
-  Future<bool> _refreshToken() async {
+  Future<void> _refreshToken() async {
     _log.info('Attempting token refresh...');
     if (_hassUrl == null ||
         _tokens == null ||
         !_tokens!.containsKey('refresh_token')) {
-      _log.warning('Refresh failed: Missing URL, tokens, or refresh_token.');
-      return false;
+      _log.warning(
+          'Refresh prerequisites failed: Missing URL, tokens, or refresh_token.');
+      await logout();
+      _errorMessage = 'Cannot refresh token: Missing required data.';
+      _state = AuthState.error;
+      notifyListeners();
+      throw PermanentAuthRefreshException(
+          'Missing URL, tokens, or refresh_token.');
     }
 
     final refreshToken = _tokens!['refresh_token'];
@@ -270,7 +291,7 @@ class AuthService with ChangeNotifier {
       _log.fine(
           'Refresh token response: status=${response.statusCode}, body=${response.body}');
 
-      if (response.statusCode == 200) {
+      if (response.statusCode >= 200 && response.statusCode < 300) {
         _tokens = json.decode(response.body);
 
         if (!_tokens!.containsKey('refresh_token')) {
@@ -282,30 +303,48 @@ class AuthService with ChangeNotifier {
         _updateTokenExpiryTime();
         _log.info('Token refresh successful.');
         notifyListeners();
-        return true;
+        return;
+      } else if (response.statusCode >= 500 && response.statusCode < 600) {
+        final errorMsg =
+            'Temporary server error during refresh: ${response.statusCode} ${response.body}';
+        _log.warning(errorMsg);
+        throw TemporaryAuthRefreshException(errorMsg);
       } else {
-        _log.severe(
-            'Refresh failed: Server returned status ${response.statusCode}. Body: ${response.body}');
+        final errorMsg =
+            'Permanent error during refresh: ${response.statusCode} ${response.body}';
+        _log.severe(errorMsg);
         await logout();
-        _errorMessage = 'Authentication expired. Please log in again.';
+        _errorMessage =
+            'Authentication expired or invalid. Please log in again.';
         _state = AuthState.error;
-        return false;
+        notifyListeners();
+        throw PermanentAuthRefreshException(errorMsg);
       }
     } catch (e, stackTrace) {
-      _log.severe('Exception during token refresh.', e, stackTrace);
-      _errorMessage = 'Network error during token refresh: $e';
-      _state = AuthState.error;
-      notifyListeners();
-      return false;
+      final errorMsg = 'Network exception during token refresh: $e';
+      _log.warning(errorMsg, e, stackTrace);
+      throw TemporaryAuthRefreshException(errorMsg);
     }
   }
 
   Future<String?> getValidAccessToken() async {
     if (_isTokenExpired()) {
       _log.info('Access token expired or missing. Attempting refresh.');
-      final refreshed = await _refreshToken();
-      if (!refreshed) {
-        _log.warning('Failed to refresh token.');
+      try {
+        await _refreshToken();
+      } on TemporaryAuthRefreshException catch (e) {
+        _log.warning('Temporary failure during token refresh: $e');
+        rethrow;
+      } on PermanentAuthRefreshException catch (e) {
+        _log.severe('Permanent failure during token refresh: $e');
+        return null;
+      } catch (e, stackTrace) {
+        _log.severe('Unexpected error during token refresh.', e, stackTrace);
+        if (_state != AuthState.error) {
+          _state = AuthState.error;
+          _errorMessage = 'Unexpected error during token refresh: $e';
+          notifyListeners();
+        }
         return null;
       }
     }
@@ -321,18 +360,20 @@ class AuthService with ChangeNotifier {
   Future<bool> forceRefreshToken() async {
     _log.info('Force refreshing token...');
     try {
-      final success = await _refreshToken();
-      if (success) {
-        _log.info('Force token refresh successful.');
-      } else {
-        _log.warning('Force token refresh failed (handled by _refreshToken).');
-      }
-      return success;
+      await _refreshToken();
+      _log.info('Force token refresh successful.');
+      return true;
+    } on TemporaryAuthRefreshException catch (e) {
+      _log.warning('Force token refresh failed temporarily: $e');
+      return false;
+    } on PermanentAuthRefreshException catch (e) {
+      _log.severe('Force token refresh failed permanently: $e');
+      return false;
     } catch (e, s) {
       _log.severe('Unexpected exception during forceRefreshToken.', e, s);
       if (_state != AuthState.error) {
         _state = AuthState.error;
-        _errorMessage = 'Unexpected error during token refresh: $e';
+        _errorMessage = 'Unexpected error during force token refresh: $e';
         notifyListeners();
       }
       return false;
