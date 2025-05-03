@@ -70,66 +70,89 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return InAppWebView(
-      initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
-      initialSettings: InAppWebViewSettings(
-        useHybridComposition: true,
-        javaScriptEnabled: true,
-        transparentBackground: true,
-      ),
-      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-        Factory<VerticalDragGestureRecognizer>(
-          () => VerticalDragGestureRecognizer(),
-        ),
-        Factory<HorizontalDragGestureRecognizer>(
-          () => HorizontalDragGestureRecognizer(),
-        ),
-      },
-      onWebViewCreated: (controller) {
-        _nativeController = controller;
-        _radController = AndroidWebViewController(controller);
-        _log.info('Android InAppWebViewController created and wrapped.');
+    final bool isDebug = kDebugMode;
 
-        _nativeController!.addJavaScriptHandler(
-            handlerName: 'threeFingerTapHandler',
-            callback: (args) {
-              _log.info('JavaScript handler "threeFingerTapHandler" called!');
-              if (mounted) {
+    return Stack(
+      children: [
+        InAppWebView(
+          initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
+          initialSettings: InAppWebViewSettings(
+            useHybridComposition: true,
+            javaScriptEnabled: true,
+            transparentBackground: true,
+          ),
+          gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+            Factory<VerticalDragGestureRecognizer>(
+              () => VerticalDragGestureRecognizer(),
+            ),
+            Factory<HorizontalDragGestureRecognizer>(
+              () => HorizontalDragGestureRecognizer(),
+            ),
+          },
+          onWebViewCreated: (controller) {
+            _nativeController = controller;
+            _radController = AndroidWebViewController(controller);
+            _log.info('Android InAppWebViewController created and wrapped.');
+
+            _nativeController!.addJavaScriptHandler(
+                handlerName: 'threeFingerTapHandler',
+                callback: (args) {
+                  _log.info(
+                      'JavaScript handler "threeFingerTapHandler" called!');
+                  if (mounted) {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ));
+                  } else {
+                    _log.warning(
+                        'Context not mounted, cannot navigate to LogViewerScreen from JS handler.');
+                  }
+                });
+            _log.info('Registered JS handler "threeFingerTapHandler".');
+          },
+          onLoadStop: (controller, url) async {
+            final currentUrl = url?.toString() ?? '';
+            _log.info('Android WebView finished loading: $currentUrl');
+
+            await _injectAuthTokensWithHelper(controller);
+
+            widget.onPageFinished?.call(currentUrl);
+            WebSocketService.getInstance().updateCurrentUrl(currentUrl);
+
+            _injectDisplaySettingsWithHelper(controller);
+            _injectGestureDetectionScript(controller);
+          },
+          onProgressChanged: (controller, progress) {},
+          onReceivedHttpError: (controller, request, errorResponse) {
+            _log.severe(
+                'HTTP Error: ${errorResponse.statusCode} for ${request.url}');
+          },
+          onReceivedError: (controller, request, error) {
+            _log.severe(
+                'Load Error: ${error.type} ${error.description} for ${request.url}');
+          },
+          onConsoleMessage: (controller, consoleMessage) {
+            _log.fine(
+                '[WebView Console] ${consoleMessage.messageLevel}: ${consoleMessage.message}');
+          },
+        ),
+        if (isDebug)
+          Positioned(
+            top: 10.0,
+            right: 10.0,
+            child: FloatingActionButton(
+              mini: true,
+              tooltip: 'Open Settings (Debug)',
+              onPressed: () {
+                _log.info('Debug settings button pressed.');
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (context) => const SettingsScreen(),
                 ));
-              } else {
-                _log.warning(
-                    'Context not mounted, cannot navigate to LogViewerScreen from JS handler.');
-              }
-            });
-        _log.info('Registered JS handler "threeFingerTapHandler".');
-      },
-      onLoadStop: (controller, url) async {
-        final currentUrl = url?.toString() ?? '';
-        _log.info('Android WebView finished loading: $currentUrl');
-
-        await _injectAuthTokensWithHelper(controller);
-
-        widget.onPageFinished?.call(currentUrl);
-        WebSocketService.getInstance().updateCurrentUrl(currentUrl);
-
-        _injectDisplaySettingsWithHelper(controller);
-        _injectGestureDetectionScript(controller);
-      },
-      onProgressChanged: (controller, progress) {},
-      onReceivedHttpError: (controller, request, errorResponse) {
-        _log.severe(
-            'HTTP Error: ${errorResponse.statusCode} for ${request.url}');
-      },
-      onReceivedError: (controller, request, error) {
-        _log.severe(
-            'Load Error: ${error.type} ${error.description} for ${request.url}');
-      },
-      onConsoleMessage: (controller, consoleMessage) {
-        _log.fine(
-            '[WebView Console] ${consoleMessage.messageLevel}: ${consoleMessage.message}');
-      },
+              },
+              child: const Icon(Icons.settings),
+            ),
+          ),
+      ],
     );
   }
 
