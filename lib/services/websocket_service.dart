@@ -349,6 +349,25 @@ class WebSocketService {
       }
     });
     _pendingCommands.clear();
+
+    if (scheduleReconnect) {
+      if (_baseUrl != null &&
+          _authService != null &&
+          _appStateProvider != null &&
+          _deviceId != null) {
+        _log.info(
+            'Scheduling reconnection attempt in ${_reconnectDelay.inSeconds} seconds...');
+        _reconnectTimer = Timer(_reconnectDelay, () {
+          _log.info('Attempting scheduled reconnection...');
+          connect(_baseUrl!, _authService!, _appStateProvider!, _deviceId!);
+        });
+      } else {
+        _log.warning(
+            'Cannot schedule reconnect: Missing required connection parameters (baseUrl, authService, appStateProvider, or deviceId).');
+      }
+    } else {
+      _log.info('Reconnect scheduling explicitly disabled.');
+    }
   }
 
   void _startHeartbeat() {
