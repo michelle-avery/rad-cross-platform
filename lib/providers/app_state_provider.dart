@@ -5,6 +5,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:logging/logging.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/websocket_service.dart';
 
@@ -17,6 +18,7 @@ class AppStateProvider extends ChangeNotifier {
   String? _hostName = "Unknown";
   bool? _hideHeader;
   bool? _hideSidebar;
+  String? _appVersion;
 
   final AuthService _authService;
 
@@ -31,6 +33,7 @@ class AppStateProvider extends ChangeNotifier {
   String? get hostName => _hostName;
   bool get hideHeader => _hideHeader ?? false;
   bool get hideSidebar => _hideSidebar ?? false;
+  String? get appVersion => _appVersion;
 
   AppStateProvider(this._authService) {
     _log.fine('Constructor called.');
@@ -39,6 +42,7 @@ class AppStateProvider extends ChangeNotifier {
 
   Future<void> _initialize() async {
     await _loadSavedState();
+    await _loadAppVersion();
     _authService.addListener(_handleAuthStateChanged);
     _handleAuthStateChanged();
   }
@@ -62,6 +66,17 @@ class AppStateProvider extends ChangeNotifier {
         'Loaded $_haUrlKey: $_homeAssistantUrl, $_deviceIdKey: $_deviceId, $_hideHeaderKey: $_hideHeader, $_hideSidebarKey: $_hideSidebar');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
     _log.info('isConfigured (based on URL): $_isConfigured');
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      _appVersion = '${packageInfo.version}+${packageInfo.buildNumber}';
+      _log.info('Loaded app version: $_appVersion');
+    } catch (e, s) {
+      _log.severe('Error loading app version: $e', e, s);
+      _appVersion = 'Unknown';
+    }
   }
 
   Future<void> configureInitialDeviceId(String? customDeviceId) async {

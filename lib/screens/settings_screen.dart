@@ -118,6 +118,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: Text(appState.deviceId ?? 'Not Set'),
                       leading: const Icon(Icons.perm_device_information),
                     ),
+                    ListTile(
+                      title: const Text('App Version'),
+                      subtitle: Text(appState.appVersion ?? 'Unknown'),
+                      leading: const Icon(Icons.info_outline),
+                    ),
                     const Divider(),
                     ListTile(
                       title: const Text('Hide Header (Server Setting)'),
