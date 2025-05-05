@@ -7,6 +7,7 @@ import 'package:logging/logging.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/status.dart' as status;
+import 'package:pub_semver/pub_semver.dart';
 
 import '../providers/app_state_provider.dart';
 
@@ -308,9 +309,40 @@ class WebSocketService {
                 'Received update_settings command with missing settings data or null AppStateProvider.');
           }
         } else {
-          _log.fine(
-              'Received unhandled event command: $command with data: $eventData');
-          _messageController.add(message);
+          final minVersionStr = eventData?['minimum_version'] as String?;
+          final currentVersionStr = _appStateProvider?.appVersion;
+
+          if (minVersionStr != null &&
+              minVersionStr.isNotEmpty &&
+              currentVersionStr != null &&
+              currentVersionStr.isNotEmpty &&
+              currentVersionStr != 'Unknown') {
+            try {
+              final minVersion = Version.parse(minVersionStr);
+              final currentVersionBase = currentVersionStr.split('+').first;
+              final currentVersion = Version.parse(currentVersionBase);
+
+              if (minVersion > currentVersion) {
+                _log.warning(
+                    "Received command '$command' requires minimum version $minVersionStr, but app version is $currentVersionStr. Please update the application.");
+                _messageController.add(message);
+              } else {
+                _log.fine(
+                    'Received unhandled event command: $command (version check passed) with data: $eventData');
+                _messageController.add(message);
+              }
+            } catch (e) {
+              _log.warning(
+                  'Error parsing version for command $command: min="$minVersionStr", current="$currentVersionStr". Error: $e');
+              _log.fine(
+                  'Received unhandled event command: $command (version parse failed) with data: $eventData');
+              _messageController.add(message);
+            }
+          } else {
+            _log.fine(
+                'Received unhandled event command: $command with data: $eventData');
+            _messageController.add(message);
+          }
         }
         break;
       case 'pong':
