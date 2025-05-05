@@ -518,6 +518,9 @@ class WebSocketService {
       }
 
       await _subscribeToEventsSafe();
+
+      await _updateDeviceInfo();
+
       _log.info('Initialization complete, starting heartbeat.');
       _startHeartbeat();
     } catch (e, stackTrace) {
@@ -680,6 +683,45 @@ class WebSocketService {
       _log.fine('URL update command sent successfully.');
     } catch (e, stackTrace) {
       _log.severe('Failed to send URL update command.', e, stackTrace);
+    }
+  }
+
+  Future<void> _updateDeviceInfo() async {
+    if (!_connected || _channel == null) {
+      _log.warning('Cannot send device info update - not connected.');
+      return;
+    }
+    if (_deviceId == null) {
+      _log.warning('Cannot send device info update - deviceId is null.');
+      return;
+    }
+    if (_appStateProvider == null) {
+      _log.warning(
+          'Cannot send device info update - AppStateProvider is null.');
+      return;
+    }
+
+    final String? appVersion = _appStateProvider!.appVersion;
+    if (appVersion == null || appVersion == 'Unknown') {
+      _log.warning('Cannot send device info update - app version is unknown.');
+      return;
+    }
+
+    final Map<String, dynamic> command = {
+      'type': 'remote_assist_display/update',
+      'display_id': _deviceId,
+      'data': {
+        'client_version': appVersion,
+      },
+    };
+
+    _log.info(
+        'Sending device info update (remote_assist_display/update)... Version: $appVersion');
+    try {
+      await sendCommand(command, timeout: const Duration(seconds: 5));
+      _log.fine('Device info update command sent successfully.');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to send device info update command.', e, stackTrace);
     }
   }
 }
