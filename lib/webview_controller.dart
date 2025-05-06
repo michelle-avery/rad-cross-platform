@@ -76,11 +76,18 @@ abstract class RadWebViewController {
     ''';
   }
 
-  static Future<void> handleNavigation(
-    RadWebViewController controller,
-    String target,
-    String currentBaseOrigin,
-  ) async {
+  static Future<void> handleNavigation({
+    required RadWebViewController controller,
+    required String target,
+    required String currentBaseOrigin,
+    required String refreshSignal,
+  }) async {
+    if (target == refreshSignal) {
+      _log.info('Received refresh signal. Reloading webview.');
+      await controller.reload();
+      return;
+    }
+
     final Uri targetUri = Uri.tryParse(target) ?? Uri();
     final bool isFullUrl = targetUri.hasScheme &&
         (targetUri.scheme == 'http' || targetUri.scheme == 'https');

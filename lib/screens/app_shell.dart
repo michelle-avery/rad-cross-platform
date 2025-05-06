@@ -240,9 +240,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final String baseOrigin = Uri.parse(url).origin;
 
         await RadWebViewController.handleNavigation(
-          _linuxRadController!,
-          target,
-          baseOrigin,
+          controller: _linuxRadController!,
+          target: target,
+          currentBaseOrigin: baseOrigin,
+          refreshSignal: refreshSignal,
         );
       },
       onError: (error, stackTrace) {
