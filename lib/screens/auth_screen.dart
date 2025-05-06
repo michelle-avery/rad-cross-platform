@@ -32,10 +32,12 @@ class _AuthScreenState extends State<AuthScreen> {
   final _customDeviceIdController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  String? _httpWarningMessage;
 
   @override
   void initState() {
     super.initState();
+    _urlController.addListener(_updateHttpWarning);
     // Initialize URL from provider if available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _urlController.text.isEmpty) {
@@ -43,13 +45,28 @@ class _AuthScreenState extends State<AuthScreen> {
             .homeAssistantUrl;
         if (initialUrl != null) {
           _urlController.text = initialUrl;
+          _updateHttpWarning();
         }
       }
     });
   }
 
+  void _updateHttpWarning() {
+    if (_urlController.text.trim().toLowerCase().startsWith('http://')) {
+      setState(() {
+        _httpWarningMessage =
+            'Warning: Using HTTP is insecure. HTTPS is recommended.';
+      });
+    } else {
+      setState(() {
+        _httpWarningMessage = null;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _urlController.removeListener(_updateHttpWarning);
     _urlController.dispose();
     _customDeviceIdController.dispose();
     super.dispose();
@@ -273,7 +290,17 @@ class _AuthScreenState extends State<AuthScreen> {
                               keyboardType: TextInputType.url,
                               autocorrect: false,
                               enableSuggestions: false,
+                              onChanged: (_) => _updateHttpWarning(),
                             ),
+                            if (_httpWarningMessage != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: Text(
+                                  _httpWarningMessage!,
+                                  style: const TextStyle(
+                                      color: Colors.orangeAccent, fontSize: 13),
+                                ),
+                              ),
                             if (showMigrationOption) ...[
                               const SizedBox(height: 16),
                               ExpansionTile(
