@@ -13,6 +13,8 @@ import '../providers/app_state_provider.dart';
 
 final _log = Logger('WebSocketService');
 
+const String refreshSignal = '__RAD_REFRESH__';
+
 const int _maxRegistrationRetries = 5;
 const Duration _registrationRetryDelay = Duration(seconds: 5);
 
@@ -283,6 +285,9 @@ class WebSocketService {
           } else {
             _log.warning('Received navigate command with missing/empty path.');
           }
+        } else if (command == 'remote_assist_display/refresh') {
+          _log.info('Received refresh command.');
+          _navigationTargetController.add(refreshSignal);
         } else if (command == 'remote_assist_display/update_settings') {
           _log.info('Received update_settings command: $eventData');
           final settings = eventData?['settings'] as Map<String, dynamic>?;

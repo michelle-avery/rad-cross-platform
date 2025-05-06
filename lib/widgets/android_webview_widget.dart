@@ -51,9 +51,10 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
         final String baseOrigin = Uri.parse(widget.initialUrl).origin;
 
         await RadWebViewController.handleNavigation(
-          _radController!,
-          target,
-          baseOrigin,
+          controller: _radController!,
+          target: target,
+          currentBaseOrigin: baseOrigin,
+          refreshSignal: refreshSignal,
         );
       },
       onError: (error, stackTrace) {
