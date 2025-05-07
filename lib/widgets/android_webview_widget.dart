@@ -34,6 +34,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
   InAppWebViewController? _nativeController;
   AndroidWebViewController? _radController;
   StreamSubscription<String>? _navigationSubscription;
+  bool _initialAuthCallbackReloadPending = true;
 
   @override
   void initState() {
@@ -113,15 +114,37 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
           },
           onLoadStop: (controller, url) async {
             final currentUrl = url?.toString() ?? '';
-            _log.info('Android WebView finished loading: $currentUrl');
+            _log.info(
+                'Android WebView finished loading: $currentUrl. Reload pending: $_initialAuthCallbackReloadPending');
 
-            await _injectAuthTokensWithHelper(controller);
+            if (_initialAuthCallbackReloadPending) {
+              _log.info(
+                  'Initial load with auth_callback=1. Injecting tokens and preparing for reload.');
+              await _injectAuthTokensWithHelper(controller);
+              _injectDisplaySettingsWithHelper(controller);
+              _injectGestureDetectionScript(controller);
 
-            widget.onPageFinished?.call(currentUrl);
-            WebSocketService.getInstance().updateCurrentUrl(currentUrl);
+              _log.info('Triggering reload...');
+              await controller.reload();
+              if (mounted) {
+                setState(() {
+                  _initialAuthCallbackReloadPending = false;
+                });
+              } else {
+                _initialAuthCallbackReloadPending = false;
+              }
+              _log.info(
+                  'Reload triggered. _initialAuthCallbackReloadPending set to false.');
+            } else {
+              _log.info(
+                  'Page loaded after initial reload. Calling onPageFinished and re-injecting settings/gestures.');
 
-            _injectDisplaySettingsWithHelper(controller);
-            _injectGestureDetectionScript(controller);
+              widget.onPageFinished?.call(currentUrl);
+              WebSocketService.getInstance().updateCurrentUrl(currentUrl);
+
+              _injectDisplaySettingsWithHelper(controller);
+              _injectGestureDetectionScript(controller);
+            }
           },
           onProgressChanged: (controller, progress) {},
           onReceivedHttpError: (controller, request, errorResponse) {
