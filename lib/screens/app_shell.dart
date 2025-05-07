@@ -179,13 +179,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _linuxTokenInjected = true;
           _lastInjectedAccessToken = accessToken;
           _log.info(
-              "Linux token and device ID injected/updated successfully via helper.");
-          if (!_isWebViewReady) {
-            _signalWebViewReady();
-          }
+              "Linux token and device ID injected/updated successfully via helper. Reloading webview...");
+          await _linuxRadController!.reload();
         } catch (e, s) {
           _log.severe(
-              "Error injecting token/device ID into Linux WebView: $e", e, s);
+              "Error injecting token/device ID into Linux WebView or reloading: $e",
+              e,
+              s);
         }
       } else {
         _log.warning("Cannot inject token: Missing token details.");
@@ -258,11 +258,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _log.fine(
               "isNavigating is false and token not injected. Attempting token injection.");
           await _injectTokenLinux(authService);
-        }
-
-        if (_linuxTokenInjected && _linuxRadController != null) {
+        } else {
           _log.fine(
-              "isNavigating is false, token injected. Injecting display settings...");
+              "isNavigating is false, token was previously injected (this is post-reload). Injecting display settings and signaling ready if needed.");
           final appState =
               Provider.of<AppStateProvider>(context, listen: false);
           final deviceId = appState.deviceId;
@@ -295,22 +293,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
             if (currentUrl != null && currentUrl.isNotEmpty) {
               _log.info(
-                  "Current Linux URL (from isNavigating=false): $currentUrl");
+                  "Current Linux URL (from isNavigating=false, post-reload): $currentUrl");
               if (mounted && WebSocketService.getInstance().isConnected) {
                 WebSocketService.getInstance().updateCurrentUrl(currentUrl);
               } else {
                 _log.warning(
-                    "WebSocket disconnected or unmounted before URL update (from isNavigating=false) could be sent.");
+                    "WebSocket disconnected or unmounted before URL update (from isNavigating=false, post-reload) could be sent.");
               }
             } else {
-              _log.warning("getCurrentUrl returned null or empty URL.");
+              _log.warning(
+                  "getCurrentUrl returned null or empty URL (post-reload).");
             }
           } catch (e, s) {
-            _log.severe("Error getting URL via getCurrentUrl: $e", e, s);
+            _log.severe(
+                "Error getting URL via getCurrentUrl (post-reload): $e", e, s);
           }
-        } else {
-          _log.warning(
-              "isNavigating is false, but token not injected or controller null. Cannot get URL.");
+
+          if (!_isWebViewReady) {
+            _log.info(
+                "Signaling WebView ready after Linux reload and display settings injection.");
+            _signalWebViewReady();
+          }
         }
       } else {
         _log.fine("isNavigating is true (still loading).");
