@@ -58,7 +58,6 @@ class AppStateProvider extends ChangeNotifier {
   Future<void> _loadSavedState() async {
     final prefs = await SharedPreferences.getInstance();
     _homeAssistantUrl = prefs.getString(_haUrlKey);
-    _homeAssistantUrl = prefs.getString(_haUrlKey);
     _hideHeader = prefs.getBool(_hideHeaderKey);
     _hideSidebar = prefs.getBool(_hideSidebarKey);
     _deviceId = prefs.getString(_deviceIdKey);

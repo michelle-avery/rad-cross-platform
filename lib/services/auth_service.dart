@@ -113,23 +113,6 @@ class AuthService with ChangeNotifier {
     }
   }
 
-  String getAuthorizationUrl() {
-    if (_hassUrl == null) {
-      throw StateError('Home Assistant URL not set.');
-    }
-    _pendingState = OAuthConfig.generateState();
-    final Uri authUri = Uri.parse('$_hassUrl/auth/authorize').replace(
-      queryParameters: {
-        'response_type': 'code',
-        'client_id': OAuthConfig.buildClientId(_hassUrl!),
-        'redirect_uri': OAuthConfig.redirectUri,
-        'state': _pendingState,
-      },
-    );
-    _log.info('Generated Auth URL state: $_pendingState');
-    return authUri.toString();
-  }
-
   Future<void> handleAuthCode(String code, String receivedState) async {
     _log.info('handleAuthCode called with code=$code, state=$receivedState');
     if (receivedState != _pendingState) {
@@ -454,17 +437,6 @@ class AuthService with ChangeNotifier {
       }
       cleanup();
     });
-    _linuxAuthWebview!.onClose.whenComplete(() {
-      _log.fine('WebView closed (duplicate listener).');
-      if (!codeHandled && _state == AuthState.authenticating) {
-        _log.info(
-            'Auth cancelled by user closing window (duplicate listener).');
-        _state = AuthState.unauthenticated;
-        _errorMessage = 'Authentication cancelled.';
-        notifyListeners();
-      }
-      cleanup();
-    });
 
     try {
       _linuxAuthWebview!.launch(authUrl);
@@ -482,40 +454,5 @@ class AuthService with ChangeNotifier {
       _linuxAuthWebview!.close();
       _linuxAuthWebview = null;
     }
-  }
-
-  static String generateTokenInjectionJs(String accessToken,
-      String refreshToken, int expiresIn, String clientId, String hassUrl) {
-    final expires = DateTime.now().millisecondsSinceEpoch + (expiresIn * 1000);
-    final hassTokensJson = json.encode({
-      "access_token": accessToken,
-      "refresh_token": refreshToken,
-      "expires_in": expiresIn,
-      "token_type": "Bearer",
-      "clientId": clientId,
-      "hassUrl": hassUrl,
-      "ha_auth_provider": "homeassistant",
-      "expires": expires,
-    });
-
-    return """
-      try {
-        // Use JSON.stringify for safety, though hassTokensJson is already a string
-        localStorage.setItem("hassTokens", JSON.stringify($hassTokensJson));
-        console.log('hassTokens injected successfully.');
-        // Navigate to the root dashboard or reload if already there
-        // Check if already at root or lovelace before navigating
-        if (window.location.pathname !== '/' && !window.location.pathname.startsWith('/lovelace')) {
-           console.log('Navigating to /lovelace/0 after token injection.');
-           // Use replace to avoid adding the auth page to history
-           window.location.replace('/lovelace/0');
-        } else {
-           console.log('Already at root or lovelace, reloading page after token injection.');
-           window.location.reload();
-        }
-      } catch (e) {
-        console.error('Error injecting hassTokens:', e);
-      }
-    """;
   }
 }
