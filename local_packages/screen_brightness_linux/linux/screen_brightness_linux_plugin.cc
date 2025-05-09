@@ -113,10 +113,26 @@ static void screen_brightness_linux_plugin_handle_method_call(
                 "UNAVAILABLE", "Failed to read valid max_brightness from device", nullptr));
           } else {
             int brightness_to_set = static_cast<int>(brightness_double * max_brightness);
-            brightness_to_set = std::max(0, std::min(brightness_to_set, max_brightness));
-            if (!write_int_to_file(device_path + "/brightness", brightness_to_set)) {
+            brightness_to_set = std::max(0, std::min(brightness_to_set, max_brightness)); // Ensures value is between 0 and max_brightness
+            
+            bool success = write_int_to_file(device_path + "/brightness", brightness_to_set);
+
+            // If the target brightness was 0 AND the first write was successful,
+            // perform a second write of 0.
+            if (brightness_to_set == 0 && success) {
+                // Optional: Add a very brief delay. This might help if the driver needs a moment
+                // to process the first write before the second one is effective.
+                std::this_thread::sleep_for(std::chrono::milliseconds(130)); // e.g., 50ms, tunable
+
+                // For debugging, you can add a print statement here:
+                std::cout << "ScreenBrightnessLinuxPlugin: First write of 0 was successful. Writing 0 again." << std::endl;
+                
+                success = write_int_to_file(device_path + "/brightness", 0); // Explicitly write 0 again
+            }
+
+            if (!success) {
               response = FL_METHOD_RESPONSE(fl_method_error_response_new(
-                  "IO_ERROR", "Failed to write brightness value (check permissions or device error)", nullptr));
+                  "IO_ERROR", "Failed to write brightness value (check permissions or device error after potential second attempt for 0)", nullptr));
             } else {
               response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
             }
