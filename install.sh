@@ -55,7 +55,62 @@ else
   exit 1
 fi
 
-echo "[Step 3/3] Configure Autostart (Optional)"
+echo "[Step 3/4] Configure Backlight Permissions (Linux - Optional)"
+if [ "$IS_PMOS" = true ] || uname -a | grep -q -i "linux"; then # Check if Linux, not just PMOS
+  read -p "  Do you want to attempt to set up backlight control permissions (udev rule)? (y/N): " backlight_choice
+  case "$backlight_choice" in
+    y|Y )
+      echo "    Attempting to create udev rule for backlight control..."
+      UDEV_RULE_PATH="/etc/udev/rules.d/90-backlight-radcxp.rules"
+      UDEV_RULE_CONTENT='SUBSYSTEM=="backlight", KERNEL=="backlight", RUN+="/bin/chmod a+w /sys/class/backlight/%k/brightness"'
+      
+      # Check if running as root, otherwise use sudo
+      if [ "$(id -u)" -eq 0 ]; then
+        echo "$UDEV_RULE_CONTENT" > "$UDEV_RULE_PATH"
+        udevadm control --reload-rules && udevadm trigger
+        if [ $? -eq 0 ]; then
+          echo "    Udev rule created and reloaded successfully."
+          echo "    NOTE: A reboot might be necessary for changes to fully apply on some systems."
+        else
+          echo "    [Warning] Failed to create or reload udev rule. Backlight control might not work without root."
+          echo "    You may need to create the file '$UDEV_RULE_PATH' manually with the content:"
+          echo "    $UDEV_RULE_CONTENT"
+          echo "    And then run: sudo udevadm control --reload-rules && sudo udevadm trigger"
+        fi
+      else
+        echo "    This script needs to create a udev rule at '$UDEV_RULE_PATH'."
+        echo "    Please enter your password for sudo if prompted."
+        # Check if sudo is available
+        if command -v sudo &> /dev/null; then
+          echo "$UDEV_RULE_CONTENT" | sudo tee "$UDEV_RULE_PATH" > /dev/null
+          sudo udevadm control --reload-rules && sudo udevadm trigger
+          if [ $? -eq 0 ]; then
+            echo "    Udev rule created and reloaded successfully via sudo."
+            echo "    NOTE: A reboot might be necessary for changes to fully apply on some systems."
+          else
+            echo "    [Warning] Failed to create or reload udev rule via sudo. Backlight control might not work."
+            echo "    You may need to create the file '$UDEV_RULE_PATH' manually with the content:"
+            echo "    $UDEV_RULE_CONTENT"
+            echo "    And then run: sudo udevadm control --reload-rules && sudo udevadm trigger"
+          fi
+        else
+          echo "    [Error] sudo command not found. Cannot create udev rule automatically."
+          echo "    Please create the file '$UDEV_RULE_PATH' manually with the content:"
+          echo "    $UDEV_RULE_CONTENT"
+          echo "    And then run as root: udevadm control --reload-rules && udevadm trigger"
+        fi
+      fi
+      ;;
+    * )
+      echo "    Skipping backlight permissions setup."
+      echo "    Note: Backlight control may require running the app as root or manual udev rule configuration."
+      ;;
+  esac
+else
+  echo "  Skipping backlight permissions setup (not Linux or PMOS)."
+fi
+
+echo "[Step 4/4] Configure Autostart (Optional)"
 read -p "  Do you want Remote Assist Display to start automatically on login? (y/N): " choice
 case "$choice" in
   y|Y )

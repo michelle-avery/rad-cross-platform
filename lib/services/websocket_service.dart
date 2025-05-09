@@ -299,14 +299,45 @@ class WebSocketService {
               _navigationTargetController.add(defaultDashboard);
             }
 
+            // Handle hideHeader and hideSidebar
             final hideHeader = settings['hide_header'] as bool?;
             final hideSidebar = settings['hide_sidebar'] as bool?;
             if (hideHeader != null || hideSidebar != null) {
               _log.info(
                   'Updating display settings: hideHeader=$hideHeader, hideSidebar=$hideSidebar');
+              // AppStateProvider.updateDisplaySettings will handle these
+            }
+
+            // Handle backlight
+            final backlightSetting =
+                settings['backlight']; // Can be String or num
+            if (backlightSetting != null) {
+              if (backlightSetting is String) {
+                if (backlightSetting == 'on' || backlightSetting == 'off') {
+                  _log.info('Updating backlight command: $backlightSetting');
+                  Future.microtask(() =>
+                      _appStateProvider!.setScreenBrightness(backlightSetting));
+                } else {
+                  _log.warning(
+                      'Invalid string for backlight setting: $backlightSetting');
+                }
+              } else if (backlightSetting is num) {
+                _log.info(
+                    'Updating backlight value: ${backlightSetting.toDouble()}');
+                Future.microtask(() => _appStateProvider!
+                    .setScreenBrightness("set", backlightSetting.toDouble()));
+              } else {
+                _log.warning(
+                    'Invalid type for backlight setting: ${backlightSetting.runtimeType}');
+              }
+            }
+
+            // Consolidate AppStateProvider updates for hideHeader/Sidebar
+            // setScreenBrightness is called separately above.
+            if (hideHeader != null || hideSidebar != null) {
               Future.microtask(() => _appStateProvider!.updateDisplaySettings(
-                    hideHeader: hideHeader,
-                    hideSidebar: hideSidebar,
+                    hideHeader: hideHeader, // Pass existing values
+                    hideSidebar: hideSidebar, // Pass existing values
                   ));
             }
           } else {
@@ -727,6 +758,44 @@ class WebSocketService {
       _log.fine('Device info update command sent successfully.');
     } catch (e, stackTrace) {
       _log.severe('Failed to send device info update command.', e, stackTrace);
+    }
+  }
+
+  Future<void> sendDeviceStatusUpdate() async {
+    if (!_connected || _channel == null || _appStateProvider == null) {
+      _log.fine(
+          'Cannot send device status update - not connected or AppStateProvider is null.');
+      return;
+    }
+    if (_deviceId == null) {
+      _log.warning('Cannot send device status update - deviceId is null.');
+      return;
+    }
+
+    final brightnessValue = _appStateProvider!.currentBrightness;
+    final isOn = brightnessValue != null && brightnessValue > 0.0;
+
+    final Map<String, dynamic> command = {
+      'type': 'remote_assist_display/update',
+      'display_id': _deviceId,
+      'data': {
+        'brightness': brightnessValue ??
+            -1.0, // Send -1.0 if null (e.g. not supported or unknown)
+        'is_on': isOn,
+        'hide_header': _appStateProvider!.hideHeader,
+        'hide_sidebar': _appStateProvider!.hideSidebar,
+      },
+    };
+
+    _log.fine(
+        'Sending device status update (remote_assist_display/update)... Data: ${command['data']['status']}');
+    try {
+      // Using a shorter timeout for status updates as they are periodic
+      await sendCommand(command, timeout: const Duration(seconds: 5));
+      _log.finest('Device status update command sent successfully.');
+    } catch (e, stackTrace) {
+      _log.warning(
+          'Failed to send device status update command.', e, stackTrace);
     }
   }
 }
