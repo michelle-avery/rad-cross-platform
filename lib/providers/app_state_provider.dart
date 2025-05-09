@@ -23,7 +23,7 @@ class AppStateProvider extends ChangeNotifier {
   String? _appVersion;
   double? _currentBrightness; // Added
   double? _storedBrightnessBeforeOff; // Added
-  Timer? _statusUpdateTimer; // Added
+  // Timer? _statusUpdateTimer; // Removed
   BrightnessService? _brightnessService; // Added
 
   final AuthService _authService;
@@ -64,7 +64,7 @@ class AppStateProvider extends ChangeNotifier {
             _log.info('System brightness changed externally to: $brightness');
             _currentBrightness = brightness;
             notifyListeners();
-            // Optionally, immediately send an update to HA if desired, or wait for periodic
+            _triggerStatusUpdateToHA(); // Added: Send update on external change
           }
         }, onError: (error) {
           _log.warning('Error on brightness changed stream: $error');
@@ -75,7 +75,11 @@ class AppStateProvider extends ChangeNotifier {
     } catch (e, s) {
       _log.severe('Error initializing brightness: $e', e, s);
     }
-    _startStatusUpdateTimer(); // Added
+    // _startStatusUpdateTimer(); // Removed
+    if (_currentBrightness != null) {
+      // Send initial status if brightness was determined
+      _triggerStatusUpdateToHA();
+    }
     notifyListeners(); // Notify after initial brightness load
   }
 
@@ -84,7 +88,7 @@ class AppStateProvider extends ChangeNotifier {
     _log.fine('Disposing...');
     _authService.removeListener(_handleAuthStateChanged);
     _brightnessService?.dispose(); // Added
-    _statusUpdateTimer?.cancel(); // Added
+    // _statusUpdateTimer?.cancel(); // Removed
     WebSocketService.getInstance().dispose();
     super.dispose();
   }
@@ -185,6 +189,7 @@ class AppStateProvider extends ChangeNotifier {
 
     if (changed) {
       notifyListeners();
+      _triggerStatusUpdateToHA(); // Added: Send update on display settings change
     }
   }
 
@@ -276,32 +281,18 @@ class AppStateProvider extends ChangeNotifier {
     } finally {
       notifyListeners();
       // Optionally send an immediate status update after a change
-      // _sendPeriodicStatusUpdate(); // Or a more specific "send now"
+      _triggerStatusUpdateToHA(); // Or a more specific "send now"
     }
   }
 
-  void _startStatusUpdateTimer() {
-    _statusUpdateTimer?.cancel(); // Cancel any existing timer
-    _log.info('Starting periodic status update timer (every 1 minute).');
-    _statusUpdateTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-      _sendPeriodicStatusUpdate();
-    });
-    // Send initial update shortly after start
-    Future.delayed(const Duration(seconds: 5), () {
-      if (_statusUpdateTimer != null && _statusUpdateTimer!.isActive) {
-        _sendPeriodicStatusUpdate();
-      }
-    });
-  }
-
-  void _sendPeriodicStatusUpdate() {
-    if (_authService.state != AuthState.authenticated || // Corrected check
+  void _triggerStatusUpdateToHA() {
+    if (_authService.state != AuthState.authenticated ||
         !WebSocketService.getInstance().isConnected) {
       _log.fine(
-          'Not authenticated or WebSocket not connected, skipping periodic status update.');
+          'Not authenticated or WebSocket not connected, skipping status update to HA.');
       return;
     }
-    _log.fine('Sending periodic status update to WebSocketService.');
+    _log.fine('Triggering status update to HA via WebSocketService.');
     WebSocketService.getInstance().sendDeviceStatusUpdate();
   }
 }
