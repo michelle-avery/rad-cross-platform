@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import 'package:screen_brightness/screen_brightness.dart' as android_brightness;
 import 'package:screen_brightness_linux/screen_brightness_linux.dart'
@@ -17,8 +16,6 @@ class BrightnessService {
   BrightnessService() {
     if (Platform.isLinux) {
       try {
-        // Note: The screen_brightness (Android) plugin's stream is for app-only changes.
-        // The Linux plugin's stream is intended for system-wide changes.
         _linuxBrightnessSubscription = linux_brightness
             .ScreenBrightnessLinux.instance.onSystemScreenBrightnessChanged
             .listen((brightness) {
@@ -33,8 +30,6 @@ class BrightnessService {
             'Failed to subscribe to Linux brightness changes on init: $e');
       }
     }
-    // Android plugin does not offer a reliable stream for external system changes.
-    // We will rely on polling or HA updates for Android external changes.
   }
 
   Stream<double> get onBrightnessChanged => _brightnessChangedController.stream;
@@ -48,11 +43,11 @@ class BrightnessService {
             .ScreenBrightnessLinux.instance.systemBrightness;
       } else {
         _log.warning('Unsupported platform for getCurrentBrightness');
-        return 1.0; // Default to full brightness if unsupported
+        return 1.0;
       }
     } catch (e, s) {
       _log.severe('Error getting current brightness: $e', e, s);
-      return 1.0; // Default on error
+      return 1.0;
     }
   }
 
@@ -79,7 +74,6 @@ class BrightnessService {
   Future<bool> get isPlatformSupported async {
     try {
       if (Platform.isAndroid) {
-        // Android plugin doesn't have a specific check, assume supported if platform is Android
         return true;
       } else if (Platform.isLinux) {
         return await linux_brightness

@@ -299,18 +299,14 @@ class WebSocketService {
               _navigationTargetController.add(defaultDashboard);
             }
 
-            // Handle hideHeader and hideSidebar
             final hideHeader = settings['hide_header'] as bool?;
             final hideSidebar = settings['hide_sidebar'] as bool?;
             if (hideHeader != null || hideSidebar != null) {
               _log.info(
                   'Updating display settings: hideHeader=$hideHeader, hideSidebar=$hideSidebar');
-              // AppStateProvider.updateDisplaySettings will handle these
             }
 
-            // Handle backlight
-            final backlightSetting =
-                settings['brightness']; // Can be String or num
+            final backlightSetting = settings['brightness'];
             if (backlightSetting != null) {
               if (backlightSetting is String) {
                 if (backlightSetting == 'on' || backlightSetting == 'off') {
@@ -332,12 +328,10 @@ class WebSocketService {
               }
             }
 
-            // Consolidate AppStateProvider updates for hideHeader/Sidebar
-            // setScreenBrightness is called separately above.
             if (hideHeader != null || hideSidebar != null) {
               Future.microtask(() => _appStateProvider!.updateDisplaySettings(
-                    hideHeader: hideHeader, // Pass existing values
-                    hideSidebar: hideSidebar, // Pass existing values
+                    hideHeader: hideHeader,
+                    hideSidebar: hideSidebar,
                   ));
             }
           } else {
@@ -779,8 +773,7 @@ class WebSocketService {
       'type': 'remote_assist_display/update',
       'display_id': _deviceId,
       'data': {
-        'brightness': brightnessValue ??
-            -1.0, // Send -1.0 if null (e.g. not supported or unknown)
+        'brightness': brightnessValue ?? -1.0,
         'is_on': isOn,
         'hide_header': _appStateProvider!.hideHeader,
         'hide_sidebar': _appStateProvider!.hideSidebar,
@@ -790,7 +783,6 @@ class WebSocketService {
     _log.fine(
         'Sending device status update (remote_assist_display/update)... Data: ${command['data']['status']}');
     try {
-      // Using a shorter timeout for status updates as they are periodic
       await sendCommand(command, timeout: const Duration(seconds: 5));
       _log.finest('Device status update command sent successfully.');
     } catch (e, stackTrace) {

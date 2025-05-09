@@ -27,10 +27,8 @@ FLUTTER_PLUGIN_EXPORT void screen_brightness_linux_plugin_register_with_registra
 
 G_END_DECLS
 
-// Helper class for managing the event channel stream
 class StreamHandler {
 public:
-    // Constructor no longer needs registrar if it's only for task runner
     StreamHandler(FlEventChannel* event_channel); 
     ~StreamHandler();
 
@@ -48,7 +46,6 @@ private:
     std::unique_ptr<std::thread> polling_thread_;
     std::atomic_bool stop_polling_;
     double last_known_brightness_ = -1.0;
-    // FlPluginRegistrar* registrar_ = nullptr; // Removed
     bool is_listening_ = false; 
 };
 

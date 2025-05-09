@@ -20,7 +20,6 @@ namespace fs = std::filesystem;
 
 struct _ScreenBrightnessLinuxPlugin {
   GObject parent_instance;
-  // FlPluginRegistrar* registrar; // Not strictly needed by the plugin instance itself if only used for stream handler
   FlMethodChannel* channel;
   StreamHandler* stream_handler; 
 };
@@ -66,9 +65,8 @@ static void screen_brightness_linux_plugin_handle_method_call(
     FlMethodChannel* source_channel, 
     FlMethodCall* method_call,
     gpointer user_data) {
-  // ScreenBrightnessLinuxPlugin* self = SCREEN_BRIGHTNESS_LINUX_PLUGIN(user_data); // 'self' is not used
-  (void)source_channel; // Mark as unused
-  (void)user_data;      // Mark as unused if self is not used
+  (void)source_channel;
+  (void)user_data;
 
   g_autoptr(FlMethodResponse) response = nullptr;
   const gchar* method = fl_method_call_get_name(method_call);
@@ -113,21 +111,16 @@ static void screen_brightness_linux_plugin_handle_method_call(
                 "UNAVAILABLE", "Failed to read valid max_brightness from device", nullptr));
           } else {
             int brightness_to_set = static_cast<int>(brightness_double * max_brightness);
-            brightness_to_set = std::max(0, std::min(brightness_to_set, max_brightness)); // Ensures value is between 0 and max_brightness
+            brightness_to_set = std::max(0, std::min(brightness_to_set, max_brightness));
             
             bool success = write_int_to_file(device_path + "/brightness", brightness_to_set);
 
             // If the target brightness was 0 AND the first write was successful,
-            // perform a second write of 0.
+            // perform a second write of 0. This works around an odd driver behavior
+            // where writing 0 once doesn't always set the brightness to 0.
             if (brightness_to_set == 0 && success) {
-                // Optional: Add a very brief delay. This might help if the driver needs a moment
-                // to process the first write before the second one is effective.
-                std::this_thread::sleep_for(std::chrono::milliseconds(130)); // e.g., 50ms, tunable
-
-                // For debugging, you can add a print statement here:
-                std::cout << "ScreenBrightnessLinuxPlugin: First write of 0 was successful. Writing 0 again." << std::endl;
-                
-                success = write_int_to_file(device_path + "/brightness", 0); // Explicitly write 0 again
+                std::this_thread::sleep_for(std::chrono::milliseconds(130));
+                success = write_int_to_file(device_path + "/brightness", 0);
             }
 
             if (!success) {
@@ -179,12 +172,9 @@ static void screen_brightness_linux_plugin_class_init(ScreenBrightnessLinuxPlugi
 
 static void screen_brightness_linux_plugin_init(ScreenBrightnessLinuxPlugin* self) {}
 
-// --- StreamHandler implementation ---
-// Constructor updated: no longer takes FlPluginRegistrar
 StreamHandler::StreamHandler(FlEventChannel* event_channel) 
     : event_channel_(FL_EVENT_CHANNEL(g_object_ref(event_channel))), 
       stop_polling_(false), 
-      // registrar_ removed
       is_listening_(false) {
     fl_event_channel_set_stream_handlers(event_channel_,
                                          StreamHandler::OnListen_static,
@@ -301,8 +291,6 @@ void screen_brightness_linux_plugin_register_with_registrar(
   ScreenBrightnessLinuxPlugin* plugin = SCREEN_BRIGHTNESS_LINUX_PLUGIN(
       g_object_new(screen_brightness_linux_plugin_get_type(), nullptr));
 
-  // plugin->registrar = registrar; // Not storing registrar in plugin struct anymore
-
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   plugin->channel =
       fl_method_channel_new(fl_plugin_registrar_get_messenger(registrar),
@@ -317,7 +305,6 @@ void screen_brightness_linux_plugin_register_with_registrar(
   FlEventChannel* event_channel = fl_event_channel_new(fl_plugin_registrar_get_messenger(registrar),
                                                        event_channel_name,
                                                        FL_METHOD_CODEC(codec));
-  // Pass event_channel directly, StreamHandler constructor no longer needs registrar
   plugin->stream_handler = new StreamHandler(event_channel); 
   
   g_object_unref(plugin); 
