@@ -8,6 +8,8 @@ import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/websocket_service.dart';
+import '../services/brightness_service.dart';
+import 'dart:async';
 
 final _log = Logger('AppStateProvider');
 
@@ -19,6 +21,9 @@ class AppStateProvider extends ChangeNotifier {
   bool? _hideHeader;
   bool? _hideSidebar;
   String? _appVersion;
+  double? _currentBrightness;
+  double? _storedBrightnessBeforeOff;
+  BrightnessService? _brightnessService;
 
   final AuthService _authService;
 
@@ -34,6 +39,7 @@ class AppStateProvider extends ChangeNotifier {
   bool get hideHeader => _hideHeader ?? false;
   bool get hideSidebar => _hideSidebar ?? false;
   String? get appVersion => _appVersion;
+  double? get currentBrightness => _currentBrightness;
 
   AppStateProvider(this._authService) {
     _log.fine('Constructor called.');
@@ -41,16 +47,43 @@ class AppStateProvider extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
+    _brightnessService = BrightnessService();
     await _loadSavedState();
     await _loadAppVersion();
     _authService.addListener(_handleAuthStateChanged);
     _handleAuthStateChanged();
+
+    try {
+      if (await _brightnessService!.isPlatformSupported) {
+        _currentBrightness = await _brightnessService!.getCurrentBrightness();
+        _log.info('Initial brightness loaded: $_currentBrightness');
+        _brightnessService!.onBrightnessChanged.listen((brightness) {
+          if (_currentBrightness != brightness) {
+            _log.info('System brightness changed externally to: $brightness');
+            _currentBrightness = brightness;
+            notifyListeners();
+            _triggerStatusUpdateToHA();
+          }
+        }, onError: (error) {
+          _log.warning('Error on brightness changed stream: $error');
+        });
+      } else {
+        _log.info('Brightness control not supported on this platform.');
+      }
+    } catch (e, s) {
+      _log.severe('Error initializing brightness: $e', e, s);
+    }
+    if (_currentBrightness != null) {
+      _triggerStatusUpdateToHA();
+    }
+    notifyListeners();
   }
 
   @override
   void dispose() {
     _log.fine('Disposing...');
     _authService.removeListener(_handleAuthStateChanged);
+    _brightnessService?.dispose();
     WebSocketService.getInstance().dispose();
     super.dispose();
   }
@@ -150,6 +183,7 @@ class AppStateProvider extends ChangeNotifier {
 
     if (changed) {
       notifyListeners();
+      _triggerStatusUpdateToHA();
     }
   }
 
@@ -178,5 +212,71 @@ class AppStateProvider extends ChangeNotifier {
             'Auth state changed to unauthenticated. WebSocket already disconnected.');
       }
     }
+  }
+
+  Future<void> setScreenBrightness(String command, [double? value]) async {
+    if (_brightnessService == null ||
+        !(await _brightnessService!.isPlatformSupported)) {
+      _log.warning(
+          'Attempted to set brightness, but service is null or platform not supported.');
+      return;
+    }
+
+    _log.info('Setting screen brightness via command: $command, value: $value');
+
+    try {
+      if (command == "off") {
+        if ((_currentBrightness ?? 0.0) > 0.0) {
+          _storedBrightnessBeforeOff = _currentBrightness;
+          _log.fine(
+              'Stored brightness before turning off: $_storedBrightnessBeforeOff');
+        } else if (_storedBrightnessBeforeOff == null) {
+          final actualCurrent =
+              await _brightnessService!.getCurrentBrightness();
+          _storedBrightnessBeforeOff =
+              (actualCurrent > 0.0) ? actualCurrent : 1.0;
+          _log.fine(
+              'Screen was already off or 0, captured/defaulted stored brightness: $_storedBrightnessBeforeOff');
+        }
+        await _brightnessService!.setBrightness(0.0);
+        _currentBrightness = 0.0;
+      } else if (command == "on") {
+        final restoreTo = _storedBrightnessBeforeOff ?? 1.0;
+        _log.fine('Turning screen on. Restoring to: $restoreTo');
+        await _brightnessService!.setBrightness(restoreTo);
+        _currentBrightness = restoreTo;
+        _storedBrightnessBeforeOff = null;
+      } else if (command == "set" && value != null) {
+        final clampedValue = value.clamp(0.0, 1.0);
+        await _brightnessService!.setBrightness(clampedValue);
+        _currentBrightness = clampedValue;
+        if (clampedValue == 0.0 &&
+            (_storedBrightnessBeforeOff == null ||
+                _storedBrightnessBeforeOff == 0.0)) {
+        } else if (clampedValue > 0.0) {
+          _storedBrightnessBeforeOff = null;
+        }
+      } else {
+        _log.warning(
+            'Invalid setScreenBrightness command: $command or missing value.');
+        return;
+      }
+    } catch (e, s) {
+      _log.severe('Error in setScreenBrightness: $e', e, s);
+    } finally {
+      notifyListeners();
+      _triggerStatusUpdateToHA();
+    }
+  }
+
+  void _triggerStatusUpdateToHA() {
+    if (_authService.state != AuthState.authenticated ||
+        !WebSocketService.getInstance().isConnected) {
+      _log.fine(
+          'Not authenticated or WebSocket not connected, skipping status update to HA.');
+      return;
+    }
+    _log.fine('Triggering status update to HA via WebSocketService.');
+    WebSocketService.getInstance().sendDeviceStatusUpdate();
   }
 }
