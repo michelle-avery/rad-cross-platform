@@ -310,7 +310,7 @@ class WebSocketService {
 
             // Handle backlight
             final backlightSetting =
-                settings['backlight']; // Can be String or num
+                settings['brightness']; // Can be String or num
             if (backlightSetting != null) {
               if (backlightSetting is String) {
                 if (backlightSetting == 'on' || backlightSetting == 'off') {
