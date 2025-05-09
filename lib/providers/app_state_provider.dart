@@ -8,8 +8,8 @@ import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/auth_service.dart';
 import '../services/websocket_service.dart';
-import '../services/brightness_service.dart'; // Added
-import 'dart:async'; // Added
+import '../services/brightness_service.dart';
+import 'dart:async';
 
 final _log = Logger('AppStateProvider');
 
@@ -21,10 +21,9 @@ class AppStateProvider extends ChangeNotifier {
   bool? _hideHeader;
   bool? _hideSidebar;
   String? _appVersion;
-  double? _currentBrightness; // Added
-  double? _storedBrightnessBeforeOff; // Added
-  // Timer? _statusUpdateTimer; // Removed
-  BrightnessService? _brightnessService; // Added
+  double? _currentBrightness;
+  double? _storedBrightnessBeforeOff;
+  BrightnessService? _brightnessService;
 
   final AuthService _authService;
 
@@ -40,7 +39,7 @@ class AppStateProvider extends ChangeNotifier {
   bool get hideHeader => _hideHeader ?? false;
   bool get hideSidebar => _hideSidebar ?? false;
   String? get appVersion => _appVersion;
-  double? get currentBrightness => _currentBrightness; // Added
+  double? get currentBrightness => _currentBrightness;
 
   AppStateProvider(this._authService) {
     _log.fine('Constructor called.');
@@ -48,13 +47,12 @@ class AppStateProvider extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
-    _brightnessService = BrightnessService(); // Added
+    _brightnessService = BrightnessService();
     await _loadSavedState();
     await _loadAppVersion();
     _authService.addListener(_handleAuthStateChanged);
-    _handleAuthStateChanged(); // Initial check
+    _handleAuthStateChanged();
 
-    // Initialize brightness
     try {
       if (await _brightnessService!.isPlatformSupported) {
         _currentBrightness = await _brightnessService!.getCurrentBrightness();
@@ -64,7 +62,7 @@ class AppStateProvider extends ChangeNotifier {
             _log.info('System brightness changed externally to: $brightness');
             _currentBrightness = brightness;
             notifyListeners();
-            _triggerStatusUpdateToHA(); // Added: Send update on external change
+            _triggerStatusUpdateToHA();
           }
         }, onError: (error) {
           _log.warning('Error on brightness changed stream: $error');
@@ -75,20 +73,17 @@ class AppStateProvider extends ChangeNotifier {
     } catch (e, s) {
       _log.severe('Error initializing brightness: $e', e, s);
     }
-    // _startStatusUpdateTimer(); // Removed
     if (_currentBrightness != null) {
-      // Send initial status if brightness was determined
       _triggerStatusUpdateToHA();
     }
-    notifyListeners(); // Notify after initial brightness load
+    notifyListeners();
   }
 
   @override
   void dispose() {
     _log.fine('Disposing...');
     _authService.removeListener(_handleAuthStateChanged);
-    _brightnessService?.dispose(); // Added
-    // _statusUpdateTimer?.cancel(); // Removed
+    _brightnessService?.dispose();
     WebSocketService.getInstance().dispose();
     super.dispose();
   }
@@ -103,7 +98,6 @@ class AppStateProvider extends ChangeNotifier {
         'Loaded $_haUrlKey: $_homeAssistantUrl, $_deviceIdKey: $_deviceId, $_hideHeaderKey: $_hideHeader, $_hideSidebarKey: $_hideSidebar');
     _isConfigured = _homeAssistantUrl != null && _homeAssistantUrl!.isNotEmpty;
     _log.info('isConfigured (based on URL): $_isConfigured');
-    // No brightness to load from prefs, it's read from system
   }
 
   Future<void> _loadAppVersion() async {
@@ -189,7 +183,7 @@ class AppStateProvider extends ChangeNotifier {
 
     if (changed) {
       notifyListeners();
-      _triggerStatusUpdateToHA(); // Added: Send update on display settings change
+      _triggerStatusUpdateToHA();
     }
   }
 
@@ -220,8 +214,6 @@ class AppStateProvider extends ChangeNotifier {
     }
   }
 
-  // --- Brightness and Status Update Methods ---
-
   Future<void> setScreenBrightness(String command, [double? value]) async {
     if (_brightnessService == null ||
         !(await _brightnessService!.isPlatformSupported)) {
@@ -234,14 +226,11 @@ class AppStateProvider extends ChangeNotifier {
 
     try {
       if (command == "off") {
-        // Store current brightness only if it's not already 0 (or null)
         if ((_currentBrightness ?? 0.0) > 0.0) {
           _storedBrightnessBeforeOff = _currentBrightness;
           _log.fine(
               'Stored brightness before turning off: $_storedBrightnessBeforeOff');
         } else if (_storedBrightnessBeforeOff == null) {
-          // If screen is already off or brightness is 0, and we don't have a stored value,
-          // try to get it. If it's 0, default to 1.0 for restore.
           final actualCurrent =
               await _brightnessService!.getCurrentBrightness();
           _storedBrightnessBeforeOff =
@@ -256,20 +245,16 @@ class AppStateProvider extends ChangeNotifier {
         _log.fine('Turning screen on. Restoring to: $restoreTo');
         await _brightnessService!.setBrightness(restoreTo);
         _currentBrightness = restoreTo;
-        _storedBrightnessBeforeOff = null; // Clear after restoring
+        _storedBrightnessBeforeOff = null;
       } else if (command == "set" && value != null) {
         final clampedValue = value.clamp(0.0, 1.0);
         await _brightnessService!.setBrightness(clampedValue);
         _currentBrightness = clampedValue;
-        // If setting to 0, behave like "off" for storing previous brightness
         if (clampedValue == 0.0 &&
             (_storedBrightnessBeforeOff == null ||
                 _storedBrightnessBeforeOff == 0.0)) {
-          // This case is tricky. If they set to 0, what was it before?
-          // For now, if they explicitly set to 0, we don't auto-store a previous.
-          // The "off" command is clearer for that.
         } else if (clampedValue > 0.0) {
-          _storedBrightnessBeforeOff = null; // Clear if setting to a value > 0
+          _storedBrightnessBeforeOff = null;
         }
       } else {
         _log.warning(
@@ -280,8 +265,7 @@ class AppStateProvider extends ChangeNotifier {
       _log.severe('Error in setScreenBrightness: $e', e, s);
     } finally {
       notifyListeners();
-      // Optionally send an immediate status update after a change
-      _triggerStatusUpdateToHA(); // Or a more specific "send now"
+      _triggerStatusUpdateToHA();
     }
   }
 

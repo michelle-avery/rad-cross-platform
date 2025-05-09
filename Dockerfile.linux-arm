@@ -53,7 +53,6 @@ COPY . .
 # Ensure Linux desktop support is enabled in the Flutter config
 RUN flutter config --enable-linux-desktop
 
-
 # Define the command to run when the container starts
 # This process includes several workarounds:
 # 1. Copy the Flutter engine library to the ephemeral directory for build
