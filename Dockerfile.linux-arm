@@ -52,8 +52,6 @@ COPY . .
 
 # Ensure Linux desktop support is enabled in the Flutter config
 RUN flutter config --enable-linux-desktop
-RUN find /usr -name "flutter_linux.h"
-RUN cat /usr/lib/flutter/bin/cache/artifacts/engine/linux-arm64/flutter_linux/flutter_linux.h
 
 
 # Define the command to run when the container starts
