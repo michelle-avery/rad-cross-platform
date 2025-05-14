@@ -70,12 +70,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             WakelockPlus.enable();
             break;
           case AppLifecycleState.inactive:
+            _log.info(
+                "App detected as inactive, but not manually disabling wakelock.");
+            break;
           case AppLifecycleState.paused:
+            _log.info(
+                "App paused, but not manually disabling wakelock (Android).");
+            break;
           case AppLifecycleState.detached:
+            _log.info(
+                "App detached, but not manually disabling wakelock (Android).");
+            break;
           case AppLifecycleState.hidden:
             _log.info(
-                "App inactive/paused/detached/hidden, disabling wakelock (Android).");
-            WakelockPlus.disable();
+                "App hidden, but not manually disabling wakelock (Android).");
             break;
         }
       } else {
