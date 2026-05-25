@@ -82,6 +82,7 @@ class _AndroidWebViewWidgetState extends State<AndroidWebViewWidget> {
             useHybridComposition: true,
             javaScriptEnabled: true,
             transparentBackground: true,
+            mediaPlaybackRequiresUserGesture: false,
           ),
           gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
             Factory<VerticalDragGestureRecognizer>(
